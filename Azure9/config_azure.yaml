@@ -1,0 +1,107 @@
+identity:
+  name: "Azure"
+  command_prefix: "a!"
+  respond_to_names: ["azure"]
+  # Fill in Azure's actual bot user ID after first launch (run bot, check logs for "Azure is online as ... (ID: XXXX)")
+  bot_user_id: "1469204633313476681"
+  active_channels:
+    - 1469236520870482074
+  db_path: "azure_memory.db"
+  vector_data_path: "azure_vectors.npz"
+  metadata_path: "azure_metadata.json"
+  # Sister info
+  sister_name: "Rose"
+  sister_bot_id: "1468121050305789984"
+  sister_channel_id: 1474940420893970623
+  max_sister_exchanges: 5
+  # Behavior
+  dm_check_interval: 1800
+  reflection_interval: 3600
+  dm_probability: 0.25
+  context_window: 30
+  # Probability (0.0–1.0) that Azure responds to a message in an active channel
+  # when the model says RESPOND but she wasn't directly addressed.
+  # Affection for the user adds up to 0.25 on top of this.
+  # 0.65 = she'll engage roughly 2/3 of the time when something seems worth saying.
+  base_engage_prob: 0.65
+  # Project / workspace settings
+  project_check_interval: 600      # How often (seconds) Azure considers working (10 min)
+  project_initial_delay: 120       # Delay after boot before first check (2 min)
+  project_max_steps: 20            # Max tool calls per session before stopping
+  project_announce_channel: null   # Set to a channel ID to have her announce she worked on something
+                                   # e.g. project_announce_channel: 1469236520870482074
+
+  default_interests:
+    - "pixel art"
+    - "3D modeling"
+    - "digital art"
+    - "game development"
+    - "ASCII art"
+    - "Roblox"
+    - "coding"
+    - "music"
+
+discord:
+  token: "MTQ2OTIwNDYzMzMxMzQ3NjY4MQ.GH-Fsl.xS_na-1OqdRd-Fh0kf2eLWrjqYECVOJ9jC0lVE"
+  guild_id: "1469117062814109831"
+
+cerebras:
+  api_keys:
+    - "csk-rrykdwyvjky3595x65wdcrw359e5dc9ckm3e9rtfk9nkx4k2"
+    - "csk-6x6w4mydj643xccfmpy332yrk8rnnrf3ph5ycfwv9y3mcn3e"
+    - "csk-fd6tvkvf6jc5fpxvkm2nmf5h4jjkfrmkfmwme6j4weknc6ej"
+  models:
+    - llama3.1-8b
+  timeout_s: 10
+  max_tokens: 8192
+  temperature: 0.70
+
+groq:
+  api_keys:
+    - "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"
+    - "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"
+    - "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"
+  models:
+    - meta-llama/llama-4-scout-17b-16e-instruct
+    - qwen-qwq-32b
+  timeout_s: 10
+  max_tokens: 8192
+  temperature: 0.70
+
+openrouter:
+  api_keys:
+    - "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"
+    - "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"
+    - "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"
+  models:
+    - openrouter/auto
+  timeout_s: 30
+  max_tokens: 8192
+  temperature: 0.70
+
+local_music_generator:
+  url: "http://localhost:8000/generate"
+
+google_ai_studio:
+  api_keys:
+    - "AIzaSyDLU1Iz45YN1P3hc7q3tpPaoiqxEPYAYck"
+    - "AIzaSyAFDrcWBWR28oET9y4-Iu_VEqplR61tpjs"
+    - "AIzaSyDWgqoMzzf6a5GzvMuGC5xc_k3cMkSRPxI"
+    - "AIzaSyCTGkL6f-4BxSPBM2ukiXDO0V2dGX75UjA"
+  vision_models:
+    - gemini-2.5-flash
+    - gemini-2.5-pro
+  models:
+    - gemini-2.5-flash
+    - gemini-2.5-pro
+  timeout_s: 30
+  max_tokens: 8192
+  temperature: 0.70
+
+stt:
+  deepgram_api_key: "91ad4cd8-dd1a-4696-b80d-c265db40c438"
+  assemblyai_api_key: "6ea6c4ea5fe3430bb4006ff38a640551"
+
+game_api:
+  url: "https://ais-dev-zy7cwa4foyte3pd6jrjasg-150522857433.us-west1.run.app"
+  api_key: "YOUR_AI_API_KEY" # Replace with the AI_API_KEY from your .env

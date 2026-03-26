@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and game progress",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "username": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "chips": { "type": "number" },
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "joinDate": { "type": "string" },
+        "lastQuestRefresh": { "type": "string" },
+        "dailyLoginLastClaimed": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "chips", "xp", "level", "username", "joinDate"]
+    },
+    "UserCard": {
+      "title": "UserCard",
+      "description": "A card owned by a user",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "cardId": { "type": "string" },
+        "printNumber": { "type": "number" },
+        "acquiredAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "cardId", "printNumber", "acquiredAt"]
+    },
+    "MarketListing": {
+      "title": "MarketListing",
+      "description": "A card listed for sale",
+      "type": "object",
+      "properties": {
+        "sellerUid": { "type": "string" },
+        "userCardId": { "type": "string" },
+        "price": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sellerUid", "userCardId", "price", "active", "createdAt"]
+    },
+    "Trade": {
+      "title": "Trade",
+      "description": "A trade offer between two users",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string" },
+        "receiverUid": { "type": "string" },
+        "senderCardIds": { "type": "array", "items": { "type": "string" } },
+        "receiverCardIds": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderUid", "receiverUid", "senderCardIds", "receiverCardIds", "status", "createdAt"]
+    },
+    "Quest": {
+      "title": "Quest",
+      "description": "A quest assigned to a user",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "questId": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "progress": { "type": "number" },
+        "total": { "type": "number" },
+        "reward": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "claimed": { "type": "boolean" }
+      },
+      "required": ["uid", "questId", "title", "type", "difficulty", "progress", "total", "reward", "completed", "claimed"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "User activity log",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "text": { "type": "string" },
+        "type": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "text", "type", "timestamp"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "A record of a card sold on the marketplace",
+      "type": "object",
+      "properties": {
+        "sellerUid": { "type": "string" },
+        "buyerUid": { "type": "string" },
+        "cardName": { "type": "string" },
+        "price": { "type": "number" },
+        "payout": { "type": "number" },
+        "tax": { "type": "number" },
+        "processed": { "type": "boolean" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sellerUid", "buyerUid", "cardName", "price", "payout", "tax", "processed", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/user_cards/{userCardId}": {
+      "schema": "UserCard",
+      "description": "Individual card instances owned by users"
+    },
+    "/market_listings/{listingId}": {
+      "schema": "MarketListing",
+      "description": "Active marketplace listings"
+    },
+    "/trades/{tradeId}": {
+      "schema": "Trade",
+      "description": "Trade offers"
+    },
+    "/quests/{questId}": {
+      "schema": "Quest",
+      "description": "User quests"
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "User activity feed"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Marketplace sales records"
+    }
+  }
+}
