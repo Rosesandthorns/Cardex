@@ -37,7 +37,7 @@ export const INITIAL_PACKS: Pack[] = [
     description: '32 bit recreations of legally distinct characters', 
     color: 'from-green-400 to-blue-500',
     image: `${GITHUB_BASE_URL}/pixl-pack.png`,
-    creator: 'rosesandthorns',
+    creator: '@rosesandthorns',
     pullOdds: {
       [Rarity.COMMON]: 50,
       [Rarity.UNCOMMON]: 30,
@@ -52,7 +52,7 @@ export const INITIAL_PACKS: Pack[] = [
     description: 'A collection of delicious and amphibious friends.', 
     color: 'from-lime-400 to-emerald-600',
     image: `${GITHUB_BASE_URL}/FruitFrog.png`,
-    creator: 'rosesandthorns',
+    creator: '@rosesandthorns',
     pullOdds: {
       [Rarity.COMMON]: 40,
       [Rarity.UNCOMMON]: 35,
@@ -67,7 +67,7 @@ export const INITIAL_PACKS: Pack[] = [
     description: 'Scribbles come to life', 
     color: 'from-slate-200 to-slate-400',
     image: `${GITHUB_BASE_URL}/Doodleee.png`,
-    creator: 'rosesandthorns',
+    creator: '@rosesandthorns',
     pullOdds: {
       [Rarity.COMMON]: 90,
       [Rarity.UNCOMMON]: 8,
@@ -81,7 +81,6 @@ export const INITIAL_PACKS: Pack[] = [
     price: 150, 
     description: 'A high-stakes roll. Picks a random pack and pulls from its collection.', 
     color: 'from-indigo-500 via-purple-500 to-pink-500',
-    creator: '',
     // No image property as requested
   },
   { 
@@ -91,7 +90,7 @@ export const INITIAL_PACKS: Pack[] = [
     description: 'A collection of expressive faces.', 
     color: 'from-yellow-400 to-orange-500',
     image: `${GITHUB_BASE_URL}/Emotions.png`,
-    creator: 'rosesandthorns',
+    creator: '@rosesandthorns',
     pullOdds: {
       [Rarity.COMMON]: 60,
       [Rarity.UNCOMMON]: 30,
@@ -105,8 +104,8 @@ export const INITIAL_PACKS: Pack[] = [
     price: 250, 
     description: 'Sins crawling on your- wrong game.', 
     color: 'from-rose-900 via-zinc-900 to-black',
+    creator: '@pablosun',
     image: `${GITHUB_BASE_URL}/disgrace.png`,
-    creator: 'Pablosun',
     pullOdds: {
       [Rarity.COMMON]: 65,
       [Rarity.UNCOMMON]: 20,
@@ -183,15 +182,15 @@ export const INITIAL_CARDS: Card[] = [
   { id: 'emotion-sleepy', name: 'Sleepy', rarity: Rarity.RARE, totalPrintRun: 10, packName: 'Emotions', image: `${GITHUB_BASE_URL}/Sleepy.png` },
 
   // Disgrace Pack
-  { id: 'disgrace-weird-bird', name: 'Weird Bird', rarity: Rarity.COMMON, totalPrintRun: 1000, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/weirdbird.png` },
   { id: 'disgrace-lotus', name: 'Lotus', rarity: Rarity.COMMON, totalPrintRun: 1000, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/lotus.png` },
+  { id: 'disgrace-weird-bird', name: 'Bird Thing', rarity: Rarity.COMMON, totalPrintRun: 1000, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/weirdbird.png` },
   { id: 'disgrace-clock-thing', name: 'Clock Thing', rarity: Rarity.UNCOMMON, totalPrintRun: 100, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/clockthing.png` },
-  { id: 'disgrace-wake', name: 'Wake', rarity: Rarity.RARE, totalPrintRun: 10, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/wake.png` },
+  { id: 'disgrace-ice-cream', name: 'Ice Cream', rarity: Rarity.UNCOMMON, totalPrintRun: 100, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/icecream.png` },
   { id: 'disgrace-food-colouring', name: 'Food Colouring', rarity: Rarity.RARE, totalPrintRun: 10, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/foodcolouring.png` },
-  { id: 'disgrace-ice-cream', name: 'Ice Cream', rarity: Rarity.RARE, totalPrintRun: 10, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/icecream.png` },
+  { id: 'disgrace-wake', name: 'Wake', rarity: Rarity.RARE, totalPrintRun: 10, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/wake.png` },
   { id: 'disgrace-sins', name: 'Sins', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/sinsundertale.png` },
   { id: 'disgrace-man-upstairs', name: 'Man Upstairs', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/manupstairs.png` },
-  { id: 'disgrace-broken-camera', name: 'Broken Camera', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/brokencamera.png` },
+  { id: 'disgrace-broken-camera', name: 'Cracked Camera', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/brokencamera.png`, isFullArt: true },
 ];
 
 export const INITIAL_QUESTS: Omit<Quest, 'uid' | 'id'>[] = [];

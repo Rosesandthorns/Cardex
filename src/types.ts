@@ -25,6 +25,7 @@ export interface UserCard {
   card?: Card;
   isForSale?: boolean;
   isPendingTrade?: boolean;
+  isHidden?: boolean;
 }
 
 export interface Pack {
@@ -34,10 +35,10 @@ export interface Pack {
   description: string;
   color: string;
   image?: string;
-  creator: string;
   pullOdds?: {
     [key in Rarity]?: number;
   };
+  creator?: string;
 }
 
 export interface Quest {
@@ -73,10 +74,7 @@ export interface UserProfile {
   dailyLoginLastClaimed?: string;
   dailyLoginStreak?: number;
   lastQuestRefresh?: string;
-  hourlyEarnings?: number;
-  lastHourlyReset?: string;
   joinDate: string;
-  showcaseCardIds?: string[];
   location?: {
     lat: number;
     lng: number;

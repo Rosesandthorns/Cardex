@@ -23,16 +23,6 @@ export const Money: React.FC<MoneyProps> = ({ user }) => {
     const now = Date.now();
     const interval = now - lastClickTime.current;
     
-    // Check hourly limit
-    const lastReset = user.lastHourlyReset ? new Date(user.lastHourlyReset).getTime() : 0;
-    const isNewHour = now - lastReset > 3600000;
-    const currentHourlyEarnings = isNewHour ? 0 : (user.hourlyEarnings || 0);
-
-    if (currentHourlyEarnings >= 300) {
-      // Show some feedback that limit is reached
-      return;
-    }
-
     // 1. Check for extremely fast clicking (less than 60ms)
     if (interval < 60 && lastClickTime.current !== 0) {
       setIsBot(true);
@@ -68,19 +58,28 @@ export const Money: React.FC<MoneyProps> = ({ user }) => {
     if (clickCount.current >= 10) {
       clickCount.current = 0;
       
+      const currentHour = new Date().toISOString().slice(0, 13);
+      const hourlyRecord = JSON.parse(localStorage.getItem(`moneyTab_${user.uid}`) || '{"hour": "", "amount": 0}');
+      
+      if (hourlyRecord.hour !== currentHour) {
+        hourlyRecord.hour = currentHour;
+        hourlyRecord.amount = 0;
+      }
+      
+      if (hourlyRecord.amount >= 300) {
+        alert('You have reached the maximum 300 chips per hour limit. Take a break!');
+        return;
+      }
+      
+      hourlyRecord.amount += 1;
+      localStorage.setItem(`moneyTab_${user.uid}`, JSON.stringify(hourlyRecord));
+
       // Grant reward
       try {
         const userRef = doc(db, 'users', user.uid);
-        const updateData: any = {
-          chips: increment(1),
-          hourlyEarnings: isNewHour ? 1 : increment(1)
-        };
-        
-        if (isNewHour) {
-          updateData.lastHourlyReset = new Date().toISOString();
-        }
-
-        await updateDoc(userRef, updateData);
+        await updateDoc(userRef, {
+          chips: increment(1)
+        });
         
         setShowReward(true);
         setTimeout(() => setShowReward(false), 1000);
@@ -98,27 +97,11 @@ export const Money: React.FC<MoneyProps> = ({ user }) => {
     }
   }, [isBot]);
 
-  const lastReset = user.lastHourlyReset ? new Date(user.lastHourlyReset).getTime() : 0;
-  const isNewHour = Date.now() - lastReset > 3600000;
-  const currentHourlyEarnings = isNewHour ? 0 : (user.hourlyEarnings || 0);
-  const limitReached = currentHourlyEarnings >= 300;
-
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
       <div className="text-center space-y-2">
         <h2 className="text-3xl font-display font-bold text-white">Token Generator</h2>
         <p className="text-slate-400">Click the button 10 times to earn 1 Chip</p>
-        <div className="flex items-center justify-center gap-2 text-sm">
-          <span className={`${limitReached ? 'text-rose-400 font-bold' : 'text-slate-500'}`}>
-            Hourly Limit: {currentHourlyEarnings}/300
-          </span>
-          {limitReached && (
-            <span className="text-rose-400 flex items-center gap-1">
-              <ShieldAlert size={14} />
-              Limit Reached
-            </span>
-          )}
-        </div>
       </div>
 
       <div className="relative">
@@ -139,14 +122,10 @@ export const Money: React.FC<MoneyProps> = ({ user }) => {
         </AnimatePresence>
 
         <motion.button
-          whileHover={!limitReached ? { scale: 1.05 } : {}}
-          whileTap={!limitReached ? { scale: 0.95 } : {}}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
           onClick={handleClick}
-          disabled={limitReached}
-          className={`w-48 h-48 rounded-full flex flex-col items-center justify-center gap-4 shadow-2xl transition-all duration-300 border-4 border-white/10 text-white 
-            ${limitReached 
-              ? 'bg-slate-800 cursor-not-allowed opacity-50 grayscale' 
-              : 'bg-gradient-to-br from-indigo-600 to-purple-700 hover:shadow-indigo-500/40'}`}
+          className="w-48 h-48 rounded-full flex flex-col items-center justify-center gap-4 shadow-2xl transition-all duration-300 bg-gradient-to-br from-indigo-600 to-purple-700 border-4 border-white/10 text-white hover:shadow-indigo-500/40"
         >
           <div className="relative">
             <MousePointer2 size={48} />
@@ -154,9 +133,7 @@ export const Money: React.FC<MoneyProps> = ({ user }) => {
               {clicks}
             </div>
           </div>
-          <span className="font-bold uppercase tracking-widest text-sm">
-            {limitReached ? 'Locked' : 'Generate'}
-          </span>
+          <span className="font-bold uppercase tracking-widest text-sm">Generate</span>
         </motion.button>
       </div>
 

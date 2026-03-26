@@ -1,452 +1,870 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * IMPORTANT: See guidelines.md before modifying this file.
+ * This is the REAL Firebase-connected App. Do NOT replace it with a fake
+ * offline / demo version. Firebase errors must show the error screen, not
+ * a fake working app with static data.
+ */
+
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, ShoppingBag, Library, Coins, X, ChevronRight, Trophy } from 'lucide-react';
-import { Card, Rarity } from './types';
-import { INITIAL_CARDS as CARDS, INITIAL_PACKS } from './constants';
+import { Layout } from './components/Layout';
+import { Home } from './screens/Home';
+import { Collection } from './screens/Collection';
+import { Marketplace } from './screens/Marketplace';
+import { Trades } from './screens/Trades';
+import { CardBrowser } from './screens/CardBrowser';
+import { Profile } from './screens/Profile';
+import { PackOpening } from './screens/PackOpening';
+import { Money } from './screens/Money';
+import { Events } from './screens/Events';
+import { FAQ } from './screens/FAQ';
 import { RarePairs } from './components/RarePairs';
+import { INITIAL_CARDS, INITIAL_QUESTS, INITIAL_PACKS, QUEST_POOLS } from './constants';
+import { Card, UserProfile, UserCard, Quest, Activity } from './types';
+import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType } from './firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import {
+  doc, onSnapshot, setDoc, getDoc, collection, query, where, updateDoc,
+  addDoc, getDocs, deleteDoc, increment, runTransaction
+} from 'firebase/firestore';
+import { LogIn, Sparkles, AlertTriangle, RefreshCcw } from 'lucide-react';
 
-const DISGRACE_PACK = INITIAL_PACKS.find(p => p.id === 'disgrace-pack')!;
-
-// --- Components ---
-
-const CardComponent = ({ card, size = 'md', showInfo = true }: { card: Card; size?: 'sm' | 'md' | 'lg'; showInfo?: boolean }) => {
-  const rarityColors: Record<Rarity, string> = {
-    [Rarity.COMMON]: 'text-zinc-400',
-    [Rarity.UNCOMMON]: 'text-blue-400',
-    [Rarity.RARE]: 'text-purple-400',
-    [Rarity.LEGENDARY]: 'text-amber-400',
-  };
-
-  const rarityBorders: Record<Rarity, string> = {
-    [Rarity.COMMON]: 'border-zinc-800',
-    [Rarity.UNCOMMON]: 'border-blue-900/50',
-    [Rarity.RARE]: 'border-purple-900/50',
-    [Rarity.LEGENDARY]: 'border-amber-500/50 legendary-glow',
-  };
-
-  const sizes = {
-    sm: 'w-32 h-44',
-    md: 'w-48 h-64',
-    lg: 'w-64 h-88',
-  };
-
-  if (card.isFullArt) {
-    return (
-      <motion.div
-        layoutId={card.id}
-        className={`${sizes[size]} rounded-xl overflow-hidden border-2 ${rarityBorders[card.rarity]} relative group cursor-pointer`}
+// ── Error Screen ───────────────────────────────────────────────────────────
+// See guidelines.md: Firebase errors MUST show this screen, never a fake app.
+const FirebaseErrorScreen = ({ error }: { error: string }) => (
+  <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6">
+    <div className="max-w-lg w-full bg-rose-950/30 border border-rose-500/30 rounded-3xl p-12 text-center backdrop-blur-xl">
+      <div className="w-20 h-20 bg-rose-500/10 rounded-2xl flex items-center justify-center mx-auto mb-8">
+        <AlertTriangle className="w-10 h-10 text-rose-400" />
+      </div>
+      <h1 className="text-3xl font-display font-bold text-white mb-4">Connection Error</h1>
+      <p className="text-zinc-400 mb-4 leading-relaxed">
+        Vantage could not connect to its database. This is a real error — the app will not show
+        fake data. Please check your network connection or Firebase configuration.
+      </p>
+      <div className="bg-black/40 rounded-xl p-4 mb-8 text-left font-mono text-xs text-rose-300 break-all max-h-40 overflow-auto">
+        {error}
+      </div>
+      <p className="text-zinc-600 text-xs mb-6">
+        Full error details have been printed to the browser console.
+      </p>
+      <button
+        onClick={() => window.location.reload()}
+        className="w-full bg-rose-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-rose-500 transition-all active:scale-[0.98]"
       >
-        <img 
-          src={card.image} 
-          alt={card.name} 
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-          referrerPolicy="no-referrer"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
-          <p className="text-[10px] font-mono tracking-widest uppercase text-white/50">Full Art Legendary</p>
+        <RefreshCcw className="w-5 h-5" />
+        Retry
+      </button>
+    </div>
+  </div>
+);
+
+// ── App ────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [activeTab, setActiveTab] = useState('home');
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userCards, setUserCards] = useState<UserCard[]>([]);
+  const [userListings, setUserListings] = useState<string[]>([]);
+  const [pendingSenderCardIds, setPendingSenderCardIds] = useState<string[]>([]);
+  const [pendingReceiverCardIds, setPendingReceiverCardIds] = useState<string[]>([]);
+  const [quests, setQuests] = useState<Quest[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [openingPack, setOpeningPack] = useState<{ id: string; cost: number; count?: number } | null>(null);
+  const [isAddingCards, setIsAddingCards] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [firebaseError, setFirebaseError] = useState<string | null>(null);
+  const [lastRarity, setLastRarity] = useState<string | null>(null);
+  const [rarityStreak, setRarityStreak] = useState(0);
+
+  // Rare Pairs state (persisted in localStorage across sessions)
+  const [rarePairsStreak, setRarePairsStreak] = useState<number>(() => {
+    const saved = localStorage.getItem('rp_streak');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [showRarePairs, setShowRarePairs] = useState(false);
+
+  // Persist streak
+  useEffect(() => {
+    localStorage.setItem('rp_streak', rarePairsStreak.toString());
+  }, [rarePairsStreak]);
+
+  // ── Auth Listener ────────────────────────────────────────────────────────
+  useEffect(() => {
+    console.log('[App] Setting up Firebase auth state listener...');
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (firebaseUser) => {
+        if (firebaseUser) {
+          console.log('[App/Auth] ✅ User signed in. UID:', firebaseUser.uid, '| Email:', firebaseUser.email);
+        } else {
+          console.log('[App/Auth] User signed out / no session.');
+        }
+        setUser(firebaseUser);
+        if (!firebaseUser) {
+          setUserProfile(null);
+          setUserCards([]);
+          setQuests([]);
+          setActivities([]);
+          setLoading(false);
+        }
+      },
+      (error) => {
+        console.error('[App/Auth] ❌ Auth state listener error:', error);
+        setFirebaseError(`Auth error: ${error.message}`);
+        setLoading(false);
+      }
+    );
+    return () => {
+      console.log('[App] Tearing down auth listener.');
+      unsubscribe();
+    };
+  }, []);
+
+  // ── Firestore Listeners ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    console.log('[App] Setting up Firestore listeners for user:', user.uid);
+
+    let unsubProfile: () => void;
+    let unsubCards: () => void;
+    let unsubQuests: () => void;
+    let unsubActivities: () => void;
+    let unsubTradesSender: () => void;
+    let unsubTradesReceiver: () => void;
+    let unsubPendingTradesSender: () => void;
+    let unsubPendingTradesReceiver: () => void;
+    let unsubMyListings: () => void;
+    let unsubSales: () => void;
+    let unsubPurchases: () => void;
+
+    const setupListeners = async () => {
+      const userRef = doc(db, 'users', user.uid);
+
+      // ── Profile setup / load ─────────────────────────────────────────────
+      try {
+        console.log('[App] Checking user profile in Firestore...');
+        const userSnap = await getDoc(userRef);
+
+        if (!userSnap.exists()) {
+          console.log('[App] New user — creating profile for UID:', user.uid);
+          const baseUsername = (user.displayName || 'Collector').toLowerCase().replace(/\s+/g, '');
+          const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+          const defaultUsername = `${baseUsername}${randomSuffix}`;
+
+          const newProfile: UserProfile = {
+            uid: user.uid,
+            displayName: user.displayName || 'New Collector',
+            username: defaultUsername,
+            photoURL: user.photoURL || '',
+            chips: 1000,
+            xp: 0,
+            level: 1,
+            joinDate: new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          };
+          await setDoc(userRef, newProfile);
+          setUserProfile(newProfile);
+          console.log('[App] ✅ New user profile created:', defaultUsername);
+
+          await refreshQuests(user.uid, true);
+
+          await addDoc(collection(db, 'activities'), {
+            uid: user.uid,
+            text: 'Joined Vantage! Welcome to the collection.',
+            type: 'quest',
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          const data = userSnap.data() as UserProfile;
+          console.log('[App] ✅ Existing user profile loaded. Username:', data.username, '| Chips:', data.chips);
+
+          if (!data.username) {
+            const baseUsername = (data.displayName || 'Collector').toLowerCase().replace(/\s+/g, '');
+            const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+            await updateDoc(userRef, { username: `${baseUsername}${randomSuffix}` });
+          }
+
+          const today = new Date().toISOString().split('T')[0];
+          if (data.lastQuestRefresh !== today) {
+            console.log('[App] Quest refresh due (last:', data.lastQuestRefresh, '| today:', today, ')');
+            await refreshQuests(user.uid, true);
+          } else {
+            console.log('[App] Quests up to date. Validating...');
+            await refreshQuests(user.uid, false);
+          }
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error('[App] ❌ Error during profile setup:', msg, error);
+        setFirebaseError(`Profile setup failed: ${msg}`);
+        setLoading(false);
+        return;
+      }
+
+      // ── Profile listener ─────────────────────────────────────────────────
+      console.log('[App] Attaching profile listener...');
+      unsubProfile = onSnapshot(
+        userRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as UserProfile;
+            console.log('[App/Profile] Profile updated. Chips:', data.chips, '| Level:', data.level);
+            setUserProfile(data);
+          }
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Profile] ❌ Profile listener error:', error);
+            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+          }
+        }
+      );
+
+      // ── Cards listener ───────────────────────────────────────────────────
+      console.log('[App] Attaching user_cards listener...');
+      const cardsQuery = query(collection(db, 'user_cards'), where('ownerUid', '==', user.uid));
+      unsubCards = onSnapshot(
+        cardsQuery,
+        async (snapshot) => {
+          const invalidDocIds: string[] = [];
+          const cards = snapshot.docs
+            .map((docSnap) => {
+              const data = docSnap.data();
+              if (data.isHidden) return null;
+              const cardDef = INITIAL_CARDS.find((c) => c.id === data.cardId);
+
+              if (!cardDef || !data.ownerUid || typeof data.printNumber !== 'number') {
+                console.warn('[App/Cards] Invalid card doc', docSnap.id, '— will hide. Missing cardDef:', !cardDef);
+                invalidDocIds.push(docSnap.id);
+                return null;
+              }
+
+              return { id: docSnap.id, ...data, card: cardDef } as UserCard;
+            })
+            .filter((uc): uc is UserCard => uc !== null);
+
+          if (invalidDocIds.length > 0) {
+            console.warn(`[App/Cards] Hiding ${invalidDocIds.length} invalid user card doc(s) for user ${user.uid}:`, invalidDocIds);
+            invalidDocIds.forEach((id) => {
+              updateDoc(doc(db, 'user_cards', id), { isHidden: true }).catch((err) =>
+                console.error(`[App/Cards] Failed to hide invalid card doc ${id}:`, err)
+              );
+            });
+          }
+
+          console.log(`[App/Cards] Collection updated. Valid cards: ${cards.length}`);
+          setUserCards(cards);
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Cards] ❌ user_cards listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'user_cards');
+          }
+        }
+      );
+
+      // ── Quests listener ──────────────────────────────────────────────────
+      console.log('[App] Attaching quests listener...');
+      const questsQuery = query(collection(db, 'quests'), where('uid', '==', user.uid));
+      unsubQuests = onSnapshot(
+        questsQuery,
+        (snapshot) => {
+          const qList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Quest));
+          console.log(`[App/Quests] Quests updated. Count: ${qList.length}`);
+          setQuests(qList);
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Quests] ❌ quests listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'quests');
+          }
+        }
+      );
+
+      // ── Activities listener ──────────────────────────────────────────────
+      console.log('[App] Attaching activities listener...');
+      const activitiesQuery = query(collection(db, 'activities'), where('uid', '==', user.uid));
+      unsubActivities = onSnapshot(
+        activitiesQuery,
+        (snapshot) => {
+          const aList = snapshot.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Activity))
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          console.log(`[App/Activities] Activities updated. Count: ${aList.length}`);
+          setActivities(aList);
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Activities] ❌ activities listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'activities');
+          }
+        }
+      );
+
+      // ── Market listings listener ─────────────────────────────────────────
+      console.log('[App] Attaching market_listings listener...');
+      const myListingsQuery = query(
+        collection(db, 'market_listings'),
+        where('sellerUid', '==', user.uid),
+        where('active', '==', true)
+      );
+      unsubMyListings = onSnapshot(
+        myListingsQuery,
+        (snapshot) => {
+          const ids = snapshot.docs.map((d) => d.data().userCardId);
+          console.log(`[App/Market] Active listings updated. Count: ${ids.length}`);
+          setUserListings(ids);
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Market] ❌ market_listings listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'market_listings');
+          }
+        }
+      );
+
+      // ── Pending trades listeners ─────────────────────────────────────────
+      console.log('[App] Attaching pending trades listeners...');
+
+      const pendingTradesSenderQuery = query(
+        collection(db, 'trades'),
+        where('senderUid', '==', user.uid),
+        where('status', '==', 'pending')
+      );
+      unsubPendingTradesSender = onSnapshot(
+        pendingTradesSenderQuery,
+        (snapshot) => {
+          const ids = snapshot.docs.flatMap((d) => d.data().senderCardIds || []);
+          console.log(`[App/Trades] Pending outgoing trades updated. Card IDs in escrow: ${ids.length}`);
+          setPendingSenderCardIds(ids);
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Trades] ❌ pending trades (sender) listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'trades');
+          }
+        }
+      );
+
+      const pendingTradesReceiverQuery = query(
+        collection(db, 'trades'),
+        where('receiverUid', '==', user.uid),
+        where('status', '==', 'pending')
+      );
+      unsubPendingTradesReceiver = onSnapshot(
+        pendingTradesReceiverQuery,
+        (snapshot) => {
+          const ids = snapshot.docs.flatMap((d) => d.data().receiverCardIds || []);
+          console.log(`[App/Trades] Pending incoming trades updated. Card IDs in escrow: ${ids.length}`);
+          setPendingReceiverCardIds(ids);
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Trades] ❌ pending trades (receiver) listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'trades');
+          }
+        }
+      );
+
+      // ── Accepted trades (quest progression) ─────────────────────────────
+      const processTrades = (snapshot: any) => {
+        const key = `processed_trades_${user.uid}`;
+        const processed = JSON.parse(localStorage.getItem(key) || '[]');
+        const newProcessed = [...processed];
+        let changed = false;
+
+        snapshot.docs.forEach((d: any) => {
+          const data = d.data();
+          if (!processed.includes(d.id)) {
+            const isSender = data.senderUid === user.uid;
+            const cardCount = isSender ? (data.senderCardIds?.length || 0) : (data.receiverCardIds?.length || 0);
+            console.log(`[App/Trades] Processing accepted trade ${d.id} — card count: ${cardCount}`);
+            progressQuest('trade', cardCount, user.uid);
+            newProcessed.push(d.id);
+            changed = true;
+          }
+        });
+
+        if (changed) localStorage.setItem(key, JSON.stringify(newProcessed));
+      };
+
+      const tradesSenderQuery = query(
+        collection(db, 'trades'),
+        where('senderUid', '==', user.uid),
+        where('status', '==', 'accepted')
+      );
+      unsubTradesSender = onSnapshot(tradesSenderQuery, processTrades, (error) => {
+        if (auth.currentUser) {
+          console.error('[App/Trades] ❌ accepted trades (sender) listener error:', error);
+          handleFirestoreError(error, OperationType.LIST, 'trades');
+        }
+      });
+
+      const tradesReceiverQuery = query(
+        collection(db, 'trades'),
+        where('receiverUid', '==', user.uid),
+        where('status', '==', 'accepted')
+      );
+      unsubTradesReceiver = onSnapshot(tradesReceiverQuery, processTrades, (error) => {
+        if (auth.currentUser) {
+          console.error('[App/Trades] ❌ accepted trades (receiver) listener error:', error);
+          handleFirestoreError(error, OperationType.LIST, 'trades');
+        }
+      });
+
+      // ── Sales listener (payout crediting) ───────────────────────────────
+      console.log('[App] Attaching sales listener...');
+      const salesQuery = query(
+        collection(db, 'sales'),
+        where('sellerUid', '==', user.uid),
+        where('processed', '==', false)
+      );
+      unsubSales = onSnapshot(
+        salesQuery,
+        async (snapshot) => {
+          for (const sDoc of snapshot.docs) {
+            const saleRef = doc(db, 'sales', sDoc.id);
+            const userRef = doc(db, 'users', user.uid);
+            try {
+              let credited = false;
+              await runTransaction(db, async (transaction) => {
+                const saleSnap = await transaction.get(saleRef);
+                if (!saleSnap.exists() || saleSnap.data().processed === true) return;
+                const sale = saleSnap.data();
+                console.log(`[App/Sales] Crediting payout for sale ${sDoc.id}. Amount: ${sale.payout}`);
+                transaction.update(userRef, { chips: increment(sale.payout) });
+                transaction.update(saleRef, { processed: true });
+                credited = true;
+              });
+
+              if (credited) {
+                const sale = sDoc.data();
+                progressQuest('sell_market', 1, user.uid);
+                await addDoc(collection(db, 'activities'), {
+                  uid: user.uid,
+                  text: `Sold ${sale.cardName} for ${sale.price} Chips (${sale.tax} tax)`,
+                  type: 'sale',
+                  timestamp: new Date().toISOString(),
+                });
+              }
+            } catch (error) {
+              console.error('[App/Sales] ❌ Error processing sale payout for', sDoc.id, ':', error);
+            }
+          }
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Sales] ❌ sales listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'sales');
+          }
+        }
+      );
+
+      // ── Purchases listener (quest progression for buyer) ─────────────────
+      console.log('[App] Attaching purchases listener...');
+      const purchasesQuery = query(collection(db, 'sales'), where('buyerUid', '==', user.uid));
+      unsubPurchases = onSnapshot(
+        purchasesQuery,
+        async (snapshot) => {
+          const key = `processed_purchases_${user.uid}`;
+          const processed = JSON.parse(localStorage.getItem(key) || '[]');
+          const newProcessed = [...processed];
+          let changed = false;
+
+          for (const pDoc of snapshot.docs) {
+            const sale = pDoc.data();
+            if (!processed.includes(pDoc.id)) {
+              console.log(`[App/Purchases] New purchase detected: ${pDoc.id} for ${sale.price} chips`);
+              progressQuest('buy_market', 1, user.uid);
+              progressQuest('spend_chips', sale.price, user.uid);
+              newProcessed.push(pDoc.id);
+              changed = true;
+            }
+          }
+
+          if (changed) localStorage.setItem(key, JSON.stringify(newProcessed));
+        },
+        (error) => {
+          if (auth.currentUser) {
+            console.error('[App/Purchases] ❌ purchases listener error:', error);
+            handleFirestoreError(error, OperationType.LIST, 'sales');
+          }
+        }
+      );
+
+      console.log('[App] ✅ All Firestore listeners established.');
+      setLoading(false);
+    };
+
+    setupListeners();
+
+    return () => {
+      console.log('[App] Tearing down all Firestore listeners for user:', user.uid);
+      if (unsubProfile) unsubProfile();
+      if (unsubCards) unsubCards();
+      if (unsubQuests) unsubQuests();
+      if (unsubActivities) unsubActivities();
+      if (unsubTradesSender) unsubTradesSender();
+      if (unsubTradesReceiver) unsubTradesReceiver();
+      if (unsubPendingTradesSender) unsubPendingTradesSender();
+      if (unsubPendingTradesReceiver) unsubPendingTradesReceiver();
+      if (unsubMyListings) unsubMyListings();
+      if (unsubSales) unsubSales();
+      if (unsubPurchases) unsubPurchases();
+    };
+  }, [user]);
+
+  // ── Geolocation ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (user && userProfile) {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            const userRef = doc(db, 'users', user.uid);
+            const lastUpdated = userProfile.location?.lastUpdated;
+            const oneHourAgo = new Date(Date.now() - 3_600_000).toISOString();
+
+            if (!lastUpdated || lastUpdated < oneHourAgo) {
+              console.log('[App/Geo] Updating location for user:', user.uid);
+              await updateDoc(userRef, {
+                location: { lat: latitude, lng: longitude, lastUpdated: new Date().toISOString() },
+              });
+            }
+          },
+          (error) => {
+            console.warn('[App/Geo] Geolocation error (non-critical):', error.message);
+          }
+        );
+      }
+    }
+  }, [user, userProfile?.uid]);
+
+  // ── Quest Helpers ────────────────────────────────────────────────────────
+  const progressQuest = async (type: string, amount: number = 1, uid?: string) => {
+    const targetUid = uid || user?.uid;
+    if (!targetUid) return;
+    try {
+      const q = query(collection(db, 'quests'), where('uid', '==', targetUid), where('type', '==', type));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        console.log(`[App/Quests] No active quests of type "${type}" for user ${targetUid}`);
+        return;
+      }
+
+      for (const questDoc of snap.docs) {
+        await runTransaction(db, async (transaction) => {
+          const qSnap = await transaction.get(doc(db, 'quests', questDoc.id));
+          if (!qSnap.exists()) return;
+          const data = qSnap.data() as Quest;
+          if (data.completed) return;
+          const newProgress = Math.min(data.progress + amount, data.total);
+          console.log(`[App/Quests] Progressing quest "${data.title}" (${type}): ${data.progress} → ${newProgress} / ${data.total}`);
+          transaction.update(doc(db, 'quests', questDoc.id), {
+            progress: newProgress,
+            completed: newProgress >= data.total,
+          });
+        });
+      }
+    } catch (error) {
+      console.error('[App/Quests] ❌ Error progressing quest type:', type, error);
+    }
+  };
+
+  const refreshQuests = async (uid: string, force: boolean = false) => {
+    const today = new Date().toISOString().split('T')[0];
+    const userRef = doc(db, 'users', uid);
+    const q = query(collection(db, 'quests'), where('uid', '==', uid));
+    const snap = await getDocs(q);
+    const existingQuests = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quest));
+    console.log(`[App/Quests] refreshQuests called. force=${force}, existing=${existingQuests.length}`);
+
+    if (force) {
+      for (const quest of existingQuests) {
+        await deleteDoc(doc(db, 'quests', quest.id));
+      }
+    } else {
+      const validIds = [
+        ...QUEST_POOLS.easy,
+        ...QUEST_POOLS.medium,
+        ...QUEST_POOLS.hard,
+      ].map((t) => t.questId);
+      for (const quest of existingQuests) {
+        if (!quest.completed && !validIds.includes(quest.questId)) {
+          console.log('[App/Quests] Deleting invalid/stale quest:', quest.questId);
+          await deleteDoc(doc(db, 'quests', quest.id));
+        }
+      }
+    }
+
+    const currentSnap = await getDocs(q);
+    const currentQuests = currentSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Quest));
+
+    const difficulties: ('easy' | 'medium' | 'hard')[] = ['easy', 'medium', 'hard'];
+    for (const diff of difficulties) {
+      const hasQuest = currentQuests.some((q) => q.difficulty === diff);
+      if (!hasQuest) {
+        const pool = QUEST_POOLS[diff];
+        const template = pool[Math.floor(Math.random() * pool.length)];
+        console.log(`[App/Quests] Adding new ${diff} quest: "${template.title}"`);
+        await addDoc(collection(db, 'quests'), {
+          uid,
+          questId: template.questId,
+          title: template.title,
+          progress: 0,
+          total: template.total,
+          reward: template.reward,
+          difficulty: template.difficulty,
+          type: template.type,
+          completed: false,
+          claimed: false,
+        });
+      }
+    }
+
+    await updateDoc(userRef, { lastQuestRefresh: today });
+    console.log('[App/Quests] Quest refresh complete for date:', today);
+  };
+
+  // ── Pack Handlers ────────────────────────────────────────────────────────
+  const handleOpenPack = (packId: string, cost: number, count: number = 1) => {
+    if (userProfile && userProfile.chips >= cost) {
+      console.log(`[App/Pack] Opening pack "${packId}" × ${count}. Cost: ${cost}`);
+      setOpeningPack({ id: packId, cost, count });
+    } else {
+      console.warn('[App/Pack] Insufficient chips. Have:', userProfile?.chips, '| Need:', cost);
+    }
+  };
+
+  const handleAddCards = async (newCards: Card[]) => {
+    if (!user || !userProfile || isAddingCards || !openingPack) return;
+    setIsAddingCards(true);
+    console.log(`[App/Pack] Adding ${newCards.length} pulled card(s) to Firestore. Pack cost: ${openingPack.cost}`);
+
+    try {
+      const packCost = openingPack.cost;
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { chips: Math.max(0, userProfile.chips - packCost) });
+
+      let currentLastRarity = lastRarity;
+      let currentStreak = rarityStreak;
+
+      for (const card of newCards) {
+        const q = query(collection(db, 'user_cards'), where('cardId', '==', card.id));
+        const snap = await getDocs(q);
+        const nums = snap.docs.map((d) => d.data().printNumber as number).filter((n) => typeof n === 'number').sort((a, b) => a - b);
+        let assignedPrintNumber = 1;
+        for (const num of nums) {
+          if (num === assignedPrintNumber) assignedPrintNumber++;
+          else if (num > assignedPrintNumber) break;
+        }
+
+        console.log(`[App/Pack] Saving card "${card.name}" with print #${assignedPrintNumber}`);
+        await addDoc(collection(db, 'user_cards'), {
+          ownerUid: user.uid,
+          cardId: card.id,
+          printNumber: assignedPrintNumber,
+          totalPrintRun: card.totalPrintRun,
+          acquiredAt: new Date().toISOString(),
+        });
+
+        await addDoc(collection(db, 'activities'), {
+          uid: user.uid,
+          text: `Pulled ${card.name} #${assignedPrintNumber} from a pack!`,
+          type: 'pack',
+          timestamp: new Date().toISOString(),
+        });
+
+        if (card.rarity === 'Rare' || card.rarity === 'Legendary') {
+          await progressQuest('get_rare_legendary', 1);
+        }
+
+        if (currentLastRarity === card.rarity) {
+          currentStreak++;
+          if (currentStreak >= 2) await progressQuest('same_rarity_streak', 1);
+        } else {
+          currentStreak = 1;
+          currentLastRarity = card.rarity;
+        }
+      }
+
+      setLastRarity(currentLastRarity);
+      setRarityStreak(currentStreak);
+      await progressQuest('open_pack', 1);
+      await progressQuest('spend_chips', packCost);
+      console.log('[App/Pack] ✅ Cards saved successfully.');
+    } catch (error) {
+      console.error('[App/Pack] ❌ Error saving pulled cards:', error);
+    } finally {
+      setIsAddingCards(false);
+    }
+  };
+
+  const handleClosePack = () => {
+    console.log('[App/Pack] Pack session closed. Returning to collection.');
+    setOpeningPack(null);
+    setActiveTab('collection');
+  };
+
+  // ── Rare Pairs chip earning ──────────────────────────────────────────────
+  const handleRarePairsEarnChips = async (amount: number) => {
+    if (!user || !userProfile) return;
+    console.log(`[App/RarePairs] Awarding ${amount} chips for win. Current: ${userProfile.chips}`);
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { chips: increment(amount) });
+      await addDoc(collection(db, 'activities'), {
+        uid: user.uid,
+        text: `Won ${amount} chips playing Rare Pairs! (Streak: ${rarePairsStreak + 1})`,
+        type: 'quest',
+        timestamp: new Date().toISOString(),
+      });
+      console.log(`[App/RarePairs] ✅ Chips awarded. New balance: ${userProfile.chips + amount}`);
+    } catch (error) {
+      console.error('[App/RarePairs] ❌ Error awarding chips:', error);
+    }
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  // IMPORTANT: Firebase error → show error screen, NOT a fake app (see guidelines.md)
+  if (firebaseError) {
+    console.error('[App] Rendering FirebaseErrorScreen due to error:', firebaseError);
+    return <FirebaseErrorScreen error={firebaseError} />;
+  }
+
+  if (loading || (user && !userProfile)) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Sparkles className="w-12 h-12 text-emerald-400 animate-pulse" />
+          <p className="text-emerald-400/60 font-mono text-sm tracking-widest uppercase">
+            Initializing Vantage...
+          </p>
         </div>
-        <div className="card-shimmer absolute inset-0 pointer-events-none" />
-      </motion.div>
+      </div>
     );
   }
 
-  return (
-    <motion.div
-      layoutId={card.id}
-      className={`${sizes[size]} rounded-xl overflow-hidden border-2 ${rarityBorders[card.rarity]} bg-zinc-900 flex flex-col relative group cursor-pointer`}
-    >
-      <div className="flex-1 overflow-hidden relative">
-        <img 
-          src={card.image} 
-          alt={card.name} 
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-          referrerPolicy="no-referrer"
-        />
-        <div className="card-shimmer absolute inset-0 pointer-events-none" />
-      </div>
-      
-      {showInfo && (
-        <div className="p-3 bg-zinc-950 border-t border-white/5">
-          <p className={`text-[10px] font-mono tracking-widest uppercase ${rarityColors[card.rarity]} mb-1`}>
-            {card.rarity}
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-zinc-900/50 border border-white/5 rounded-3xl p-12 text-center backdrop-blur-xl">
+          <div className="w-20 h-20 bg-emerald-500/10 rounded-2xl flex items-center justify-center mx-auto mb-8">
+            <Sparkles className="w-10 h-10 text-emerald-400" />
+          </div>
+          <h1 className="text-4xl font-display font-bold text-white mb-4 tracking-tight">VANTAGE</h1>
+          <p className="text-zinc-400 mb-12 leading-relaxed">
+            The ultimate digital card collecting experience. Collect, trade, and dominate the marketplace.
           </p>
-          <h3 className="text-sm font-display font-bold text-white truncate">{card.name}</h3>
+          <button
+            onClick={loginWithGoogle}
+            className="w-full bg-white text-black font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-emerald-400 transition-all active:scale-[0.98]"
+          >
+            <LogIn className="w-5 h-5" />
+            Sign in with Google
+          </button>
         </div>
-      )}
-    </motion.div>
-  );
-};
+      </div>
+    );
+  }
 
-const PackOpening = ({ onComplete }: { onComplete: (cards: Card[]) => void }) => {
-  const [step, setStep] = useState<'closed' | 'opening' | 'revealing'>('closed');
-  const [pulledCards, setPulledCards] = useState<Card[]>([]);
-  const [revealIndex, setRevealIndex] = useState(-1);
+  const enrichedUserCards = userCards.map((card) => ({
+    ...card,
+    isForSale: userListings.includes(card.id),
+    isPendingTrade:
+      pendingSenderCardIds.includes(card.id) || pendingReceiverCardIds.includes(card.id),
+  }));
 
-  const openPack = () => {
-    setStep('opening');
-    
-    // Simulate opening delay
-    setTimeout(() => {
-      const newCards: Card[] = [];
-      for (let i = 0; i < 5; i++) {
-        const rand = Math.random();
-        let rarity: Rarity = Rarity.COMMON;
-        
-        if (rand < 0.0005) rarity = Rarity.LEGENDARY;
-        else if (rand < 0.15) rarity = Rarity.RARE;
-        else if (rand < 0.35) rarity = Rarity.UNCOMMON;
-        
-        const possibleCards = CARDS.filter(c => c.rarity === rarity);
-        const selectedCard = possibleCards[Math.floor(Math.random() * possibleCards.length)];
-        newCards.push(selectedCard);
-      }
-      setPulledCards(newCards);
-      setStep('revealing');
-      setRevealIndex(0);
-    }, 1500);
-  };
+  // Rare Pairs shown as full-screen overlay over the collection tab
+  if (showRarePairs) {
+    return (
+      <Layout activeTab="collection" setActiveTab={setActiveTab} chips={userProfile?.chips || 0} userPhotoURL={userProfile?.photoURL}>
+        <RarePairs
+          collection={enrichedUserCards}
+          chips={userProfile?.chips || 0}
+          onEarnChips={handleRarePairsEarnChips}
+          streak={rarePairsStreak}
+          setStreak={setRarePairsStreak}
+          onBack={() => {
+            console.log('[App/RarePairs] Exiting Rare Pairs, returning to collection.');
+            setShowRarePairs(false);
+          }}
+        />
+      </Layout>
+    );
+  }
 
-  const nextCard = () => {
-    if (revealIndex < pulledCards.length - 1) {
-      setRevealIndex(prev => prev + 1);
-    } else {
-      onComplete(pulledCards);
+  const renderScreen = () => {
+    if (openingPack) {
+      return (
+        <PackOpening
+          packId={openingPack.id}
+          packCost={openingPack.cost}
+          userChips={userProfile?.chips || 0}
+          onAddCards={handleAddCards}
+          onClose={handleClosePack}
+          onCancel={() => {
+            console.log('[App/Pack] Pack opening cancelled by user.');
+            setOpeningPack(null);
+          }}
+          count={openingPack.count}
+        />
+      );
+    }
+
+    switch (activeTab) {
+      case 'home':
+        return <Home user={userProfile!} quests={quests} onOpenPack={handleOpenPack} />;
+      case 'collection':
+        return (
+          <Collection
+            collection={enrichedUserCards}
+            onProgressQuest={progressQuest}
+            onPlayRarePairs={() => {
+              console.log('[App] Launching Rare Pairs from Collection tab.');
+              setShowRarePairs(true);
+            }}
+          />
+        );
+      case 'market':
+        return <Marketplace user={userProfile!} collection={enrichedUserCards} onProgressQuest={progressQuest} />;
+      case 'trades':
+        return <Trades user={userProfile!} collection={enrichedUserCards} onProgressQuest={progressQuest} />;
+      case 'money':
+        return <Money user={userProfile!} />;
+      case 'profile':
+        return (
+          <Profile
+            user={userProfile!}
+            collection={enrichedUserCards}
+            activities={activities}
+            onLogout={logout}
+            setActiveTab={setActiveTab}
+          />
+        );
+      case 'events':
+        return <Events />;
+      case 'faq':
+        return <FAQ />;
+      case 'list':
+        return <CardBrowser />;
+      default:
+        return <Home user={userProfile!} quests={quests} onOpenPack={handleOpenPack} />;
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm p-6">
-      <AnimatePresence mode="wait">
-        {step === 'closed' && (
-          <motion.div
-            key="closed"
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 1.2, opacity: 0 }}
-            className="flex flex-col items-center gap-8"
-          >
-            <div className="relative w-64 h-96 group cursor-pointer" onClick={openPack}>
-              <motion.img
-                src={DISGRACE_PACK.image}
-                alt="Pack Cover"
-                className="w-full h-full object-cover rounded-2xl shadow-2xl border border-white/10"
-                whileHover={{ scale: 1.05, rotate: 2 }}
-                whileTap={{ scale: 0.95 }}
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent rounded-2xl flex flex-col justify-end p-6">
-                <h2 className="text-2xl font-display font-bold text-white mb-2">Disgrace Pack</h2>
-                <p className="text-emerald-400 font-mono text-sm tracking-widest uppercase">Tap to Open</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {step === 'opening' && (
-          <motion.div
-            key="opening"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col items-center gap-6"
-          >
-            <motion.div
-              animate={{ 
-                rotate: [0, -2, 2, -2, 2, 0],
-                scale: [1, 1.05, 1, 1.05, 1]
-              }}
-              transition={{ duration: 0.5, repeat: Infinity }}
-              className="w-64 h-96 relative"
-            >
-              <img src={DISGRACE_PACK.image} className="w-full h-full object-cover rounded-2xl opacity-50 grayscale" referrerPolicy="no-referrer" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Sparkles className="w-16 h-16 text-emerald-400 animate-pulse" />
-              </div>
-            </motion.div>
-            <p className="text-emerald-400 font-mono text-sm tracking-widest uppercase animate-pulse">Opening Pack...</p>
-          </motion.div>
-        )}
-
-        {step === 'revealing' && revealIndex >= 0 && (
-          <motion.div
-            key="revealing"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex flex-col items-center gap-12 w-full max-w-lg"
-          >
-            <div className="relative">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={revealIndex}
-                  initial={{ x: 100, opacity: 0, rotateY: 90 }}
-                  animate={{ x: 0, opacity: 1, rotateY: 0 }}
-                  exit={{ x: -100, opacity: 0, rotateY: -90 }}
-                  transition={{ type: 'spring', damping: 15 }}
-                >
-                  <CardComponent card={pulledCards[revealIndex]} size="lg" />
-                </motion.div>
-              </AnimatePresence>
-              
-              {/* Progress dots */}
-              <div className="flex justify-center gap-2 mt-8">
-                {pulledCards.map((_, i) => (
-                  <div 
-                    key={i} 
-                    className={`h-1 rounded-full transition-all duration-300 ${i === revealIndex ? 'w-8 bg-emerald-400' : 'w-2 bg-white/20'}`} 
-                  />
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={nextCard}
-              className="px-12 py-4 bg-white text-black font-bold rounded-full hover:bg-emerald-400 transition-colors active:scale-95 flex items-center gap-2"
-            >
-              {revealIndex === pulledCards.length - 1 ? 'Finish' : 'Next Card'}
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-// --- Main App ---
-
-export default function App() {
-  const [balance, setBalance] = useState(() => {
-    const saved = localStorage.getItem('vantage_balance');
-    return saved ? parseInt(saved) : 1000;
-  });
-  
-  const [collection, setCollection] = useState<Card[]>(() => {
-    const saved = localStorage.getItem('vantage_collection');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [view, setView] = useState<'store' | 'collection' | 'rare-pairs'>('store');
-  const [streak, setStreak] = useState(() => {
-    const saved = localStorage.getItem('vantage_streak');
-    return saved ? parseInt(saved) : 0;
-  });
-  const [isOpening, setIsOpening] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem('vantage_balance', balance.toString());
-  }, [balance]);
-
-  useEffect(() => {
-    localStorage.setItem('vantage_collection', JSON.stringify(collection));
-  }, [collection]);
-
-  useEffect(() => {
-    localStorage.setItem('vantage_streak', streak.toString());
-  }, [streak]);
-
-  const buyPack = () => {
-    if (balance >= DISGRACE_PACK.price) {
-      setBalance(prev => prev - DISGRACE_PACK.price);
-      setIsOpening(true);
-    } else {
-      alert('Not enough credits!');
-    }
-  };
-
-  const handlePackComplete = (newCards: Card[]) => {
-    setCollection(prev => [...prev, ...newCards]);
-    setIsOpening(false);
-    setView('collection');
-  };
-
-  const addCredits = () => {
-    setBalance(prev => prev + 500);
-  };
-
-  return (
-    <div className="min-h-screen bg-[#050505] text-zinc-100 selection:bg-emerald-500/30">
-      {/* Header */}
-      <header className="sticky top-0 z-40 glass-panel px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center">
-            <Sparkles className="w-6 h-6 text-emerald-400" />
-          </div>
-          <h1 className="text-xl font-display font-bold tracking-tight">VANTAGE</h1>
-        </div>
-
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/10">
-            <Coins className="w-4 h-4 text-amber-400" />
-            <span className="font-mono font-bold">{balance}</span>
-            <button 
-              onClick={addCredits}
-              className="ml-2 w-5 h-5 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center text-xs hover:bg-emerald-500 hover:text-black transition-colors"
-            >
-              +
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Navigation */}
-      <nav className="flex justify-center gap-4 py-8">
-        <button
-          onClick={() => setView('store')}
-          className={`flex items-center gap-2 px-6 py-2 rounded-full transition-all ${view === 'store' ? 'bg-white text-black font-bold' : 'text-zinc-500 hover:text-white'}`}
-        >
-          <ShoppingBag className="w-4 h-4" />
-          Store
-        </button>
-        <button
-          onClick={() => setView('collection')}
-          className={`flex items-center gap-2 px-6 py-2 rounded-full transition-all ${view === 'collection' ? 'bg-white text-black font-bold' : 'text-zinc-500 hover:text-white'}`}
-        >
-          <Library className="w-4 h-4" />
-          Collection
-        </button>
-        <button
-          onClick={() => setView('rare-pairs')}
-          className={`flex items-center gap-2 px-6 py-2 rounded-full transition-all ${view === 'rare-pairs' ? 'bg-white text-black font-bold' : 'text-zinc-500 hover:text-white'}`}
-        >
-          <Trophy className="w-4 h-4" />
-          Rare Pairs
-        </button>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 pb-24">
-        <AnimatePresence mode="wait">
-          {view === 'store' ? (
-            <motion.div
-              key="store"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-            >
-              <div className="glass-panel rounded-3xl p-8 flex flex-col items-center text-center group">
-                <div className="relative w-full aspect-[2/3] mb-8 overflow-hidden rounded-2xl border border-white/10">
-                  <img 
-                    src={DISGRACE_PACK.image} 
-                    alt="Pack Cover" 
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-6">
-                    <div className="flex justify-center gap-1 mb-4">
-                      <div className="w-2 h-2 rounded-full bg-zinc-400" />
-                      <div className="w-2 h-2 rounded-full bg-blue-400" />
-                      <div className="w-2 h-2 rounded-full bg-purple-400" />
-                      <div className="w-2 h-2 rounded-full bg-amber-400" />
-                    </div>
-                  </div>
-                </div>
-                
-                <h2 className="text-3xl font-display font-bold mb-2">Disgrace Pack</h2>
-                <p className="text-zinc-500 mb-8 text-sm max-w-[240px]">
-                  Contains 5 cards with a chance for legendary full art pulls.
-                </p>
-
-                <div className="w-full space-y-4">
-                  <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest text-zinc-500 border-b border-white/5 pb-2">
-                    <span>Common</span>
-                    <span>65%</span>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest text-blue-400/60 border-b border-white/5 pb-2">
-                    <span>Uncommon</span>
-                    <span>20%</span>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest text-purple-400/60 border-b border-white/5 pb-2">
-                    <span>Rare</span>
-                    <span>14.95%</span>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest text-amber-400 border-b border-white/5 pb-2">
-                    <span>Legendary</span>
-                    <span>0.05%</span>
-                  </div>
-                </div>
-
-                <button
-                  onClick={buyPack}
-                  disabled={balance < DISGRACE_PACK.price}
-                  className="mt-8 w-full py-4 bg-emerald-500 text-black font-bold rounded-2xl hover:bg-emerald-400 transition-all disabled:opacity-50 disabled:grayscale active:scale-95 flex items-center justify-center gap-2"
-                >
-                  <Coins className="w-5 h-5" />
-                  Buy for {DISGRACE_PACK.price}
-                </button>
-              </div>
-            </motion.div>
-          ) : view === 'collection' ? (
-            <motion.div
-              key="collection"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-            >
-              <div className="flex items-center justify-between mb-12">
-                <div>
-                  <h2 className="text-4xl font-display font-bold mb-2">My Collection</h2>
-                  <p className="text-zinc-500 font-mono text-sm uppercase tracking-widest">
-                    {collection.length} Cards Collected
-                  </p>
-                </div>
-                
-                <div className="flex gap-4">
-                  <div className="glass-panel px-6 py-3 rounded-2xl flex flex-col items-center">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase">Legendary</span>
-                    <span className="text-xl font-bold text-amber-400">
-                      {collection.filter(c => c.rarity === Rarity.LEGENDARY).length}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {collection.length === 0 ? (
-                <div className="glass-panel rounded-3xl p-24 text-center">
-                  <Trophy className="w-12 h-12 text-zinc-800 mx-auto mb-6" />
-                  <p className="text-zinc-500 font-serif italic text-xl">Your vault is empty. Visit the store to begin your journey.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
-                  {collection.slice().reverse().map((card, index) => (
-                    <motion.div
-                      key={`${card.id}-${index}`}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: index * 0.05 }}
-                    >
-                      <CardComponent card={card} size="sm" />
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          ) : view === 'rare-pairs' ? (
-            <motion.div
-              key="rare-pairs"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-            >
-              <RarePairs 
-                collection={collection}
-                balance={balance}
-                setBalance={setBalance}
-                streak={streak}
-                setStreak={setStreak}
-                onBack={() => setView('collection')}
-              />
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-      </main>
-
-      {/* Pack Opening Overlay */}
-      <AnimatePresence>
-        {isOpening && (
-          <PackOpening onComplete={handlePackComplete} />
-        )}
-      </AnimatePresence>
-    </div>
+    <Layout
+      activeTab={activeTab}
+      setActiveTab={setActiveTab}
+      chips={userProfile?.chips || 0}
+      userPhotoURL={userProfile?.photoURL}
+    >
+      {renderScreen()}
+    </Layout>
   );
 }

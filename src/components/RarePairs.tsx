@@ -1,24 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Card } from '../types';
+import { Card, UserCard } from '../types';
 import { Trophy, ArrowLeft, RefreshCw, AlertCircle } from 'lucide-react';
 
 interface RarePairsProps {
-  collection: Card[];
-  balance: number;
-  setBalance: (updater: (prev: number) => number | any) => void;
+  /** The authenticated user's Firestore card collection */
+  collection: UserCard[];
+  chips: number;
+  onEarnChips: (amount: number) => void;
   streak: number;
-  setStreak: (updater: (prev: number) => number | any) => void;
+  setStreak: (updater: (prev: number) => number) => void;
   onBack: () => void;
 }
 
 export const RarePairs: React.FC<RarePairsProps> = ({
   collection,
-  balance,
-  setBalance,
+  chips,
+  onEarnChips,
   streak,
   setStreak,
-  onBack
+  onBack,
 }) => {
   const [grid, setGrid] = useState<(Card | null)[][]>([]);
   const [queue, setQueue] = useState<Card[]>([]);
@@ -28,33 +29,42 @@ export const RarePairs: React.FC<RarePairsProps> = ({
 
   // Initialize game
   const initGame = useCallback(() => {
-    // Need at least 15 unique cards (by name)
+    console.log('[RarePairs] Initialising game. Collection size:', collection.length);
+
+    // Extract Card objects from UserCards, deduplicating by card name
     const uniqueCards: Card[] = [];
     const seenNames = new Set<string>();
-    
-    for (const card of collection) {
-      if (!seenNames.has(card.name)) {
-        uniqueCards.push(card);
-        seenNames.add(card.name);
+
+    for (const uc of collection) {
+      if (!uc.card) continue;
+      if (!seenNames.has(uc.card.name)) {
+        uniqueCards.push(uc.card);
+        seenNames.add(uc.card.name);
       }
       if (uniqueCards.length === 15) break;
     }
 
+    console.log('[RarePairs] Unique cards available:', uniqueCards.length);
+
     if (uniqueCards.length < 15) {
+      console.warn('[RarePairs] Insufficient unique cards to start. Need 15, have', uniqueCards.length);
       setGameState('insufficient');
       return;
     }
 
-    // Duplicate to 30
-    const gameCards = [...uniqueCards, ...uniqueCards.map(c => ({ ...c, gameId: Math.random() }))];
-    
-    // Shuffle
+    // Duplicate to 30 cards with unique game IDs
+    const gameCards = [
+      ...uniqueCards,
+      ...uniqueCards.map(c => ({ ...c, id: c.id + '_copy_' + Math.random().toString(36).slice(2) })),
+    ];
+
+    // Fisher-Yates shuffle
     for (let i = gameCards.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [gameCards[i], gameCards[j]] = [gameCards[j], gameCards[i]];
     }
 
-    // Fill 5x5 grid
+    // Fill 5×5 grid (25 cards)
     const newGrid: (Card | null)[][] = [];
     for (let r = 0; r < 5; r++) {
       newGrid.push(gameCards.slice(r * 5, (r + 1) * 5));
@@ -66,23 +76,22 @@ export const RarePairs: React.FC<RarePairsProps> = ({
     setGameState('playing');
     setSelected(null);
     setLastReward(null);
+
+    console.log('[RarePairs] Game board initialised. Queue size:', 5);
   }, [collection]);
 
   useEffect(() => {
     initGame();
   }, [initGame]);
 
-  const isAdjacent = (r1: number, c1: number, r2: number, c2: number) => {
-    return Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1 && !(r1 === r2 && c1 === c2);
-  };
+  const isAdjacent = (r1: number, c1: number, r2: number, c2: number) =>
+    Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1 && !(r1 === r2 && c1 === c2);
 
   const checkMatchesExist = (currentGrid: (Card | null)[][]) => {
     for (let r = 0; r < 5; r++) {
       for (let c = 0; c < 5; c++) {
         const card = currentGrid[r][c];
         if (!card) continue;
-        
-        // Check 8 directions
         for (let dr = -1; dr <= 1; dr++) {
           for (let dc = -1; dc <= 1; dc++) {
             if (dr === 0 && dc === 0) continue;
@@ -90,6 +99,7 @@ export const RarePairs: React.FC<RarePairsProps> = ({
             const nc = c + dc;
             if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5) {
               const other = currentGrid[nr][nc];
+              // Match by base name (strip copy suffix)
               if (other && other.name === card.name) return true;
             }
           }
@@ -106,25 +116,25 @@ export const RarePairs: React.FC<RarePairsProps> = ({
 
     if (!selected) {
       setSelected({ r, c });
-    } else {
-      if (selected.r === r && selected.c === c) {
-        setSelected(null);
-        return;
-      }
+      return;
+    }
 
-      const selectedCard = grid[selected.r][selected.c];
-      if (selectedCard && selectedCard.name === card.name && isAdjacent(selected.r, selected.c, r, c)) {
-        // Match!
-        const newGrid = grid.map(row => [...row]);
-        newGrid[selected.r][selected.c] = null;
-        newGrid[r][c] = null;
-        
-        // Process gravity and refill
-        processGravityAndRefill(newGrid);
-      } else {
-        // Not a match or not adjacent
-        setSelected({ r, c });
-      }
+    if (selected.r === r && selected.c === c) {
+      setSelected(null);
+      return;
+    }
+
+    const selectedCard = grid[selected.r][selected.c];
+    if (selectedCard && selectedCard.name === card.name && isAdjacent(selected.r, selected.c, r, c)) {
+      // Matched pair!
+      console.log('[RarePairs] Matched pair:', card.name);
+      const newGrid = grid.map(row => [...row]);
+      newGrid[selected.r][selected.c] = null;
+      newGrid[r][c] = null;
+      processGravityAndRefill(newGrid);
+    } else {
+      // Not a valid match — move selection
+      setSelected({ r, c });
     }
   };
 
@@ -132,28 +142,26 @@ export const RarePairs: React.FC<RarePairsProps> = ({
     let currentGrid = targetGrid;
     let currentQueue = [...queue];
 
-    // 1. Shift Left in each row
+    // 1. Shift left within each row (compact non-null to the left)
     for (let r = 0; r < 5; r++) {
-      const row = currentGrid[r].filter(c => c !== null);
-      while (row.length < 5) row.push(null);
+      const row = currentGrid[r].filter(c => c !== null) as Card[];
+      while (row.length < 5) row.push(null as any);
       currentGrid[r] = row;
     }
 
-    // 2. Shift Down in each column
+    // 2. Shift down within each column (gravity)
     for (let c = 0; c < 5; c++) {
-      const col = [];
+      const col: Card[] = [];
       for (let r = 0; r < 5; r++) {
-        if (currentGrid[r][c] !== null) col.push(currentGrid[r][c]);
+        if (currentGrid[r][c] !== null) col.push(currentGrid[r][c] as Card);
       }
       const newCol = [...Array(5 - col.length).fill(null), ...col];
       for (let r = 0; r < 5; r++) {
-        currentGrid[r][c] = (newCol[r] as Card | null);
+        currentGrid[r][c] = newCol[r] as Card | null;
       }
     }
 
-    // 3. Refill from queue 
-    // Fill empty spots (nulls). Since gravity is bottom-left, empty spots are usually top-right.
-    // We fill from bottom to top, left to right for consistency.
+    // 3. Refill empty spots from the queue (bottom-to-top, left-to-right)
     for (let r = 4; r >= 0; r--) {
       for (let c = 0; c < 5; c++) {
         if (currentGrid[r][c] === null && currentQueue.length > 0) {
@@ -166,6 +174,8 @@ export const RarePairs: React.FC<RarePairsProps> = ({
     setQueue(currentQueue);
     setSelected(null);
 
+    console.log('[RarePairs] After refill. Remaining queue:', currentQueue.length);
+
     // Check end conditions
     const boardEmpty = currentGrid.every(row => row.every(c => c === null));
     if (boardEmpty && currentQueue.length === 0) {
@@ -176,19 +186,23 @@ export const RarePairs: React.FC<RarePairsProps> = ({
   };
 
   const handleWin = () => {
-    const reward = 10 + (10 * streak);
-    setBalance(prev => prev + reward);
+    const reward = 10 + 10 * streak;
+    console.log(`[RarePairs] WIN! Streak: ${streak}, reward: ${reward} chips`);
+    onEarnChips(reward);
     setStreak(prev => prev + 1);
     setLastReward(reward);
     setGameState('won');
   };
 
   const handleLoss = () => {
+    console.log('[RarePairs] LOSS — no valid adjacent matches remaining. Streak reset.');
     setStreak(() => 0);
     setGameState('lost');
   };
 
+  /* ---- Insufficient cards screen ---- */
   if (gameState === 'insufficient') {
+    const uniqueCount = new Set(collection.map(uc => uc.card?.name).filter(Boolean)).size;
     return (
       <div className="flex flex-col items-center justify-center p-12 text-center space-y-6 min-h-[60vh]">
         <div className="w-20 h-20 bg-rose-500/10 rounded-full flex items-center justify-center">
@@ -196,25 +210,33 @@ export const RarePairs: React.FC<RarePairsProps> = ({
         </div>
         <h2 className="text-3xl font-display font-bold">Not Enough Cards</h2>
         <p className="text-zinc-400 max-w-sm">
-          You need at least 15 unique cards in your collection to play Rare Pairs. 
-          Current unique cards: {new Set(collection.map(c => c.name)).size}
+          You need at least <span className="text-white font-bold">15 unique cards</span> in your
+          collection to play Rare Pairs.
+          <br />
+          You currently have <span className="text-indigo-400 font-bold">{uniqueCount}</span> unique card
+          {uniqueCount !== 1 ? 's' : ''}.
         </p>
         <button
           onClick={onBack}
           className="px-8 py-3 bg-white text-black font-bold rounded-full hover:bg-zinc-200 transition-colors"
         >
-          Go Back
+          Back to Collection
         </button>
       </div>
     );
   }
 
+  /* ---- Main game ---- */
   return (
     <div className="flex flex-col items-center space-y-8">
+      {/* Header row */}
       <div className="w-full flex flex-col md:flex-row justify-between items-center gap-6 mb-4">
-        <button onClick={onBack} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors group">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors group"
+        >
           <ArrowLeft size={20} className="transition-transform group-hover:-translate-x-1" />
-          <span>Back to Vantage</span>
+          <span>Back to Collection</span>
         </button>
         <div className="flex gap-4">
           <div className="glass-panel px-6 py-2 rounded-2xl flex flex-col items-center min-w-[100px]">
@@ -228,41 +250,41 @@ export const RarePairs: React.FC<RarePairsProps> = ({
         </div>
       </div>
 
+      {/* Board */}
       <div className="relative group">
-        <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 rounded-[40px] blur-2xl opacity-50 group-hover:opacity-100 transition duration-1000"></div>
+        <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-[40px] blur-2xl opacity-50 group-hover:opacity-100 transition duration-1000" />
         <div className="relative grid grid-cols-5 gap-3 p-6 glass-panel rounded-[32px] bg-black/40 border border-white/5 backdrop-blur-xl">
-          {grid.map((row, r) => 
+          {grid.map((row, r) =>
             row.map((card, c) => (
-              <div 
-                key={`${r}-${c}`}
-                className="w-20 h-28 relative"
-              >
+              <div key={`${r}-${c}`} className="w-20 h-28 relative">
                 <AnimatePresence mode="popLayout">
                   {card && (
                     <motion.div
-                      layoutId={card.id + (card as any).gameId}
+                      layoutId={card.id}
                       initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ 
-                        scale: 1, 
-                        opacity: 1,
-                        y: 0
-                      }}
-                      exit={{ scale: 0.5, opacity: 0, rotate: selected?.r === r && selected.c === c ? 0 : 10 }}
+                      animate={{ scale: 1, opacity: 1, y: 0 }}
+                      exit={{ scale: 0.5, opacity: 0 }}
                       whileHover={{ scale: 1.05, y: -2 }}
                       whileTap={{ scale: 0.95 }}
                       onClick={() => handleCardClick(r, c)}
-                      className={`w-full h-full rounded-xl overflow-hidden border-2 transition-all duration-300 cursor-pointer bg-zinc-950 flex flex-col ${selected?.r === r && selected.c === c ? 'border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)] z-10' : 'border-white/10 hover:border-white/30'}`}
+                      className={`w-full h-full rounded-xl overflow-hidden border-2 transition-all duration-300 cursor-pointer bg-zinc-950 flex flex-col ${
+                        selected?.r === r && selected.c === c
+                          ? 'border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.35)] z-10'
+                          : 'border-white/10 hover:border-white/30'
+                      }`}
                     >
                       <div className="flex-1 overflow-hidden relative">
-                        <img 
-                          src={card.image} 
-                          alt={card.name} 
+                        <img
+                          src={card.image}
+                          alt={card.name}
                           className="w-full h-full object-cover pointer-events-none"
                           referrerPolicy="no-referrer"
                         />
                       </div>
                       <div className="p-1 px-2 bg-black/80 backdrop-blur-sm">
-                        <p className="text-[9px] font-bold text-white truncate text-center uppercase tracking-tight">{card.name}</p>
+                        <p className="text-[9px] font-bold text-white truncate text-center uppercase tracking-tight">
+                          {card.name}
+                        </p>
                       </div>
                     </motion.div>
                   )}
@@ -272,33 +294,33 @@ export const RarePairs: React.FC<RarePairsProps> = ({
           )}
         </div>
 
-        {/* Game Over Overlays */}
+        {/* Game-over overlays */}
         <AnimatePresence>
           {gameState === 'won' && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/90 backdrop-blur-xl rounded-[32px] p-8 text-center border border-emerald-500/30"
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/90 backdrop-blur-xl rounded-[32px] p-8 text-center border border-indigo-500/30"
             >
               <motion.div
                 initial={{ scale: 0.5, rotate: -20 }}
                 animate={{ scale: 1, rotate: 0 }}
-                className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6"
+                className="w-24 h-24 bg-indigo-500/10 rounded-full flex items-center justify-center mb-6"
               >
-                <Trophy className="w-12 h-12 text-emerald-400" />
+                <Trophy className="w-12 h-12 text-indigo-400" />
               </motion.div>
               <h2 className="text-4xl font-display font-bold text-white mb-2">BOARD CLEARED</h2>
               {lastReward && (
                 <div className="flex items-center gap-2 justify-center mb-8">
-                  <span className="text-emerald-400 font-mono text-2xl font-bold">+{lastReward}</span>
+                  <span className="text-indigo-400 font-mono text-2xl font-bold">+{lastReward}</span>
                   <span className="text-zinc-500 font-mono text-sm uppercase tracking-widest">Chips</span>
                 </div>
               )}
               <div className="flex flex-col sm:flex-row gap-4 w-full max-w-[280px]">
                 <button
                   onClick={initGame}
-                  className="flex-1 py-4 bg-emerald-500 text-black font-bold rounded-2xl hover:bg-emerald-400 transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
+                  className="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-500 transition-all active:scale-95"
                 >
                   Play Again
                 </button>
@@ -323,7 +345,9 @@ export const RarePairs: React.FC<RarePairsProps> = ({
                 <AlertCircle className="w-12 h-12 text-rose-500" />
               </div>
               <h2 className="text-4xl font-display font-bold text-white mb-2">GAME OVER</h2>
-              <p className="text-zinc-400 mb-8 max-w-[200px] mx-auto">No matching adjacent pairs remaining.</p>
+              <p className="text-zinc-400 mb-8 max-w-[200px] mx-auto">
+                No matching adjacent pairs remaining.
+              </p>
               <div className="flex flex-col sm:flex-row gap-4 w-full max-w-[280px]">
                 <button
                   onClick={initGame}
@@ -346,10 +370,13 @@ export const RarePairs: React.FC<RarePairsProps> = ({
         </AnimatePresence>
       </div>
 
+      {/* Instructions */}
       <div className="max-w-md text-center">
         <div className="glass-panel px-6 py-4 rounded-2xl border border-white/5 bg-white/2">
           <p className="text-zinc-500 text-sm leading-relaxed">
-            Select two <span className="text-white font-bold">matching</span> cards that are <span className="text-white font-bold">touching</span> (including diagonals) to clear them. Clear all 30 cards to earn chips!
+            Select two <span className="text-white font-bold">matching</span> cards that are{' '}
+            <span className="text-white font-bold">touching</span> (including diagonals) to clear them.
+            Clear all 30 cards to earn chips!
           </p>
         </div>
       </div>
