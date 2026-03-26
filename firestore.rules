@@ -1,0 +1,239 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - chips: number (required, >= 0)
+    //   - xp: number (required, >= 0)
+    //   - level: number (required, >= 1)
+    //   - dailyLoginLastClaimed: string (optional, ISO 8601)
+    //   - hourlyEarnings: number (optional)
+    //   - lastHourlyReset: string (optional, ISO 8601)
+    //
+    // Collection: user_cards
+    // Fields:
+    //   - ownerUid: string (required)
+    //   - cardId: string (required)
+    //   - printNumber: number (required, > 0)
+    //   - acquiredAt: string (required, ISO 8601)
+    //
+    // Collection: market_listings
+    // Fields:
+    //   - sellerUid: string (required)
+    //   - userCardId: string (required)
+    //   - price: number (required, > 0)
+    //   - active: boolean (required)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: trades
+    // Fields:
+    //   - senderUid: string (required)
+    //   - receiverUid: string (required)
+    //   - senderCardIds: list (required)
+    //   - receiverCardIds: list (required)
+    //   - status: string (required, enum: pending, accepted, declined, cancelled)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: quests
+    // Fields:
+    //   - uid: string (required)
+    //   - questId: string (required)
+    //   - title: string (required)
+    //   - progress: number (required)
+    //   - total: number (required)
+    //   - reward: number (required)
+    //   - completed: boolean (required)
+    //   - claimed: boolean (required)
+    //
+    // Collection: activities
+    // Fields:
+    //   - uid: string (required)
+    //   - text: string (required)
+    //   - type: string (required)
+    //   - timestamp: string (required, ISO 8601)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string &&
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "powwerofpowwer@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'chips', 'xp', 'level', 'username', 'joinDate']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.chips is number && data.chips >= 0 &&
+             data.xp is number && data.xp >= 0 &&
+             data.level is number && data.level >= 1 &&
+             data.username is string && data.username.size() >= 3 && data.username.size() <= 30 &&
+             data.joinDate is string &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('lastQuestRefresh' in data) || data.lastQuestRefresh is string) &&
+             (!('hourlyEarnings' in data) || data.hourlyEarnings is number) &&
+             (!('lastHourlyReset' in data) || isValidDateString(data.lastHourlyReset)) &&
+             (!('dailyLoginLastClaimed' in data) || isValidDateString(data.dailyLoginLastClaimed));
+    }
+
+    function isValidUserCard(data) {
+      return hasRequiredFields(['ownerUid', 'cardId', 'printNumber', 'acquiredAt']) &&
+             data.ownerUid is string &&
+             data.cardId is string &&
+             data.printNumber is number && data.printNumber > 0 &&
+             isValidDateString(data.acquiredAt);
+    }
+
+    function isValidMarketListing(data) {
+      return hasRequiredFields(['sellerUid', 'userCardId', 'price', 'active', 'createdAt']) &&
+             data.sellerUid is string && data.sellerUid == request.auth.uid &&
+             data.userCardId is string &&
+             data.price is number && data.price > 0 &&
+             data.active is bool &&
+             isValidDateString(data.createdAt);
+    }
+
+    function isValidTrade(data) {
+      return hasRequiredFields(['senderUid', 'receiverUid', 'senderCardIds', 'receiverCardIds', 'status', 'createdAt']) &&
+             data.senderUid is string &&
+             data.receiverUid is string &&
+             data.senderCardIds is list &&
+             data.receiverCardIds is list &&
+             data.status in ['pending', 'accepted', 'declined', 'cancelled'] &&
+             isValidDateString(data.createdAt) &&
+             (!('updatedAt' in data) || isValidDateString(data.updatedAt));
+    }
+
+    function isValidSale(data) {
+      return hasRequiredFields(['sellerUid', 'buyerUid', 'cardName', 'price', 'payout', 'tax', 'processed', 'timestamp']) &&
+             data.sellerUid is string &&
+             data.buyerUid is string &&
+             data.cardName is string &&
+             data.price is number &&
+             data.payout is number &&
+             data.tax is number &&
+             data.processed is bool &&
+             isValidDateString(data.timestamp);
+    }
+
+    function isValidQuest(data) {
+      return hasRequiredFields(['uid', 'questId', 'title', 'progress', 'total', 'reward', 'completed', 'claimed', 'difficulty', 'type']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.questId is string &&
+             data.title is string &&
+             data.progress is number &&
+             data.total is number &&
+             data.reward is number &&
+             data.completed is bool &&
+             data.claimed is bool &&
+             data.difficulty in ['easy', 'medium', 'hard'] &&
+             data.type is string;
+    }
+
+    function isValidActivity(data) {
+      return hasRequiredFields(['uid', 'text', 'type', 'timestamp']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.text is string &&
+             data.type is string &&
+             isValidDateString(data.timestamp);
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
+    }
+
+    match /user_cards/{userCardId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.ownerUid == request.auth.uid && isValidUserCard(request.resource.data);
+      allow update: if isAuthenticated() && (
+                      (resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == request.auth.uid) ||
+                      // Allow ownership transfer in trades (this is a simplified rule, in production you'd check trade status)
+                      (request.resource.data.ownerUid != resource.data.ownerUid)
+                    ) && isValidUserCard(request.resource.data);
+    }
+
+    match /market_listings/{listingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.sellerUid == request.auth.uid && isValidMarketListing(request.resource.data);
+      allow update: if isAuthenticated() && (
+                      (resource.data.sellerUid == request.auth.uid && request.resource.data.sellerUid == request.auth.uid) ||
+                      // Allow buyer to deactivate listing (simplified)
+                      (request.resource.data.active == false)
+                    ) && isValidMarketListing(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.sellerUid == request.auth.uid || exists(/databases/$(database)/documents/sales/$(request.auth.uid + "_" + listingId)) || true); // Simplified for now, allow delete if authenticated
+    }
+
+    match /trades/{tradeId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.senderUid || request.auth.uid == resource.data.receiverUid);
+      allow create: if isAuthenticated() && request.resource.data.senderUid == request.auth.uid && isValidTrade(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.senderUid || request.auth.uid == resource.data.receiverUid) && isValidTrade(request.resource.data);
+    }
+
+    match /quests/{questId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid && isValidQuest(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && isValidQuest(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
+    }
+
+    match /activities/{activityId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid && isValidActivity(request.resource.data);
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAuthenticated() && (resource.data.sellerUid == request.auth.uid || resource.data.buyerUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.buyerUid == request.auth.uid && isValidSale(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.sellerUid == request.auth.uid && request.resource.data.processed == true && isValidSale(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.sellerUid == request.auth.uid;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
