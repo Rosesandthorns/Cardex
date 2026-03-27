@@ -65,9 +65,14 @@ export const RarePairs: React.FC<RarePairsProps> = ({
     }
 
     // Fill 5×5 grid (25 cards)
-    const newGrid: (Card | null)[][] = [];
+    let newGrid: (Card | null)[][] = [];
     for (let r = 0; r < 5; r++) {
       newGrid.push(gameCards.slice(r * 5, (r + 1) * 5));
+    }
+
+    // Ensure initial board has multiple solutions (at least 3)
+    if (checkMatchesCount(newGrid) < 3) {
+      newGrid = reshuffleBoard(newGrid, 3);
     }
 
     // Remaining 5 in queue
@@ -77,7 +82,7 @@ export const RarePairs: React.FC<RarePairsProps> = ({
     setSelected(null);
     setLastReward(null);
 
-    console.log('[RarePairs] Game board initialised. Queue size:', 5);
+    console.log('[RarePairs] Game board initialised with', checkMatchesCount(newGrid), 'matches. Queue size:', 5);
   }, [collection]);
 
   useEffect(() => {
@@ -87,7 +92,10 @@ export const RarePairs: React.FC<RarePairsProps> = ({
   const isAdjacent = (r1: number, c1: number, r2: number, c2: number) =>
     Math.abs(r1 - r2) <= 1 && Math.abs(c1 - c2) <= 1 && !(r1 === r2 && c1 === c2);
 
-  const checkMatchesExist = (currentGrid: (Card | null)[][]) => {
+  const checkMatchesCount = (currentGrid: (Card | null)[][]) => {
+    let count = 0;
+    const seenMatches = new Set<string>();
+    
     for (let r = 0; r < 5; r++) {
       for (let c = 0; c < 5; c++) {
         const card = currentGrid[r][c];
@@ -99,14 +107,68 @@ export const RarePairs: React.FC<RarePairsProps> = ({
             const nc = c + dc;
             if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5) {
               const other = currentGrid[nr][nc];
-              // Match by base name (strip copy suffix)
-              if (other && other.name === card.name) return true;
+              if (other && other.name === card.name) {
+                const matchKey = [card.id, other.id].sort().join('-');
+                if (!seenMatches.has(matchKey)) {
+                  seenMatches.add(matchKey);
+                  count++;
+                }
+              }
             }
           }
         }
       }
     }
-    return false;
+    return count;
+  };
+
+  const checkMatchesExist = (currentGrid: (Card | null)[][]) => {
+    return checkMatchesCount(currentGrid) > 0;
+  };
+
+  const reshuffleBoard = (currentGrid: (Card | null)[][], minMatches = 1) => {
+    console.log('[RarePairs] Reshuffling board to ensure solvability...');
+    let cards = currentGrid.flat().filter(c => c !== null) as Card[];
+    let attempts = 0;
+    let bestGrid = [...currentGrid];
+    let maxMatchesFound = 0;
+
+    while (attempts < 100) {
+      // Fisher-Yates shuffle remaining cards
+      for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+      }
+
+      // Reconstruct grid
+      const newGrid: (Card | null)[][] = [];
+      let cardIdx = 0;
+      for (let r = 0; r < 5; r++) {
+        const row: (Card | null)[] = [];
+        for (let c = 0; c < 5; c++) {
+          if (currentGrid[r][c] !== null) {
+            row.push(cards[cardIdx++]);
+          } else {
+            row.push(null);
+          }
+        }
+        newGrid.push(row);
+      }
+
+      const matches = checkMatchesCount(newGrid);
+      if (matches >= minMatches) {
+        return newGrid;
+      }
+      
+      if (matches > maxMatchesFound) {
+        maxMatchesFound = matches;
+        bestGrid = newGrid;
+      }
+      attempts++;
+    }
+    
+    console.warn(`[RarePairs] Could not reach target matches (${minMatches}). Using best found (${maxMatchesFound}).`);
+    return bestGrid;
   };
 
   const handleCardClick = (r: number, c: number) => {
@@ -170,17 +232,30 @@ export const RarePairs: React.FC<RarePairsProps> = ({
       }
     }
 
+    // 4. Ensure solvability after refill
+    const matchesAfterRefill = checkMatchesCount(currentGrid);
+    const boardEmpty = currentGrid.every(row => row.every(c => c === null));
+    
+    if (!boardEmpty && matchesAfterRefill < 2 && currentQueue.length >= 0) {
+      // If no matches or too few, reshuffle remaining cards on board
+      // If queue is empty, we must have at least 1 match if board is not empty (pairs exist)
+      const targetMatches = currentQueue.length > 0 ? 2 : 1;
+      if (matchesAfterRefill < targetMatches) {
+        currentGrid = reshuffleBoard(currentGrid, targetMatches);
+      }
+    }
+
     setGrid(currentGrid);
     setQueue(currentQueue);
     setSelected(null);
 
-    console.log('[RarePairs] After refill. Remaining queue:', currentQueue.length);
+    console.log('[RarePairs] After refill. Remaining queue:', currentQueue.length, 'Matches:', checkMatchesCount(currentGrid));
 
     // Check end conditions
-    const boardEmpty = currentGrid.every(row => row.every(c => c === null));
     if (boardEmpty && currentQueue.length === 0) {
       handleWin();
-    } else if (!checkMatchesExist(currentGrid)) {
+    } else if (checkMatchesCount(currentGrid) === 0) {
+      // This should ideally never happen now due to reshuffleBoard
       handleLoss();
     }
   };

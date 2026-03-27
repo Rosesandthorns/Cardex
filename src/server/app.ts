@@ -178,4 +178,65 @@ app.post("/api/ai/action", checkAiKey, async (req, res) => {
   }
 });
 
+export const renumberDuplicateCards = async () => {
+  const db = admin.apps.length > 0 ? admin.firestore() : null;
+  if (!db) {
+    console.error("[Vantage] Renumbering failed: Firebase Admin not initialized");
+    return;
+  }
+
+  console.log("[Vantage] Starting hourly duplicate renumbering check...");
+
+  try {
+    const cardsSnapshot = await db.collection("user_cards").get();
+    const allUserCards = cardsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+
+    // Group by cardId and printNumber
+    const groups: { [key: string]: any[] } = {};
+    allUserCards.forEach(uc => {
+      const key = `${uc.cardId}_${uc.printNumber}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(uc);
+    });
+
+    let renumberedCount = 0;
+
+    for (const key in groups) {
+      const group = groups[key];
+      if (group.length > 1) {
+        // Sort by acquiredAt: oldest first (ascending)
+        // The one printed MOST RECENTLY (latest acquiredAt) should be renumbered.
+        group.sort((a, b) => new Date(a.acquiredAt).getTime() - new Date(b.acquiredAt).getTime());
+
+        const oldest = group[0]; // Oldest stays
+        const toRenumber = group.slice(1); // More recent ones get new numbers
+
+        console.log(`[Vantage] Found ${group.length} duplicates for ${key}. Renumbering ${toRenumber.length} recent cards.`);
+
+        for (const uc of toRenumber) {
+          // Find next available number for this cardId
+          const cardId = uc.cardId;
+          const sameCardSnapshot = await db.collection("user_cards").where("cardId", "==", cardId).get();
+          const existingNumbers = sameCardSnapshot.docs.map(doc => (doc.data() as any).printNumber || 0);
+          const nextNumber = Math.max(...existingNumbers, 0) + 1;
+
+          await db.collection("user_cards").doc(uc.id).update({
+            printNumber: nextNumber,
+            renumberedAt: new Date().toISOString(),
+            originalPrintNumber: uc.printNumber,
+            renumberReason: "duplicate_check"
+          });
+          
+          renumberedCount++;
+          console.log(`[Vantage] Card ${uc.id} (${uc.cardId}) renumbered from ${uc.printNumber} to ${nextNumber}`);
+        }
+      }
+    }
+    console.log(`[Vantage] Duplicate renumbering check completed. Total renumbered: ${renumberedCount}`);
+  } catch (error) {
+    console.error("[Vantage] Error during duplicate renumbering:", error);
+  }
+};
+
 export { app };
+
