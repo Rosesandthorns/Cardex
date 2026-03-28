@@ -750,6 +750,29 @@ export default function App() {
           else if (num > assignedPrintNumber) break;
         }
 
+        // ── Vantage Red: Global Creator Restriction ─────────────────────────
+        if (card.id === 'vantage-red') {
+          console.log('[App/Pack] Checking global uniqueness for Vantage Red...');
+          const globalRedQuery = query(
+            collection(db, 'user_cards'), 
+            where('cardId', '==', 'vantage-red'),
+            where('originalOwnerName', '==', userProfile.displayName)
+          );
+          const globalRedSnap = await getDocs(globalRedQuery);
+          
+          if (!globalRedSnap.empty) {
+            console.warn(`[App/Pack] 🚨 Blocked duplicate Vantage Red pull for: ${userProfile.displayName}`);
+            await addDoc(collection(db, 'activities'), {
+              uid: user.uid,
+              text: 'Attempted to pull a duplicate Vantage Red - Exclusivity rule enforced.',
+              type: 'trade',
+              timestamp: new Date().toISOString()
+            });
+            // Skip this card in the loop
+            continue;
+          }
+        }
+
         console.log(`[App/Pack] Saving card "${card.name}" with print #${assignedPrintNumber}`);
         await addDoc(collection(db, 'user_cards'), {
           ownerUid: user.uid,
