@@ -220,6 +220,30 @@ export default function App() {
               });
             }
           }
+
+          // ── Pack Creator Reward (Vantage Yellow) ──────────────────────────
+          const madePacks = INITIAL_PACKS.some(p => p.creator?.toLowerCase() === creatorIdentifier.toLowerCase() && p.id !== 'vantage-pack');
+          if (madePacks) {
+            const yellowQuery = query(collection(db, 'user_cards'), where('ownerUid', '==', user.uid), where('cardId', '==', 'vantage-yellow'));
+            const yellowSnap = await getDocs(yellowQuery);
+            if (yellowSnap.empty) {
+              console.log('[App] Pack Creator detected! Gifting Vantage Yellow...');
+              await addDoc(collection(db, 'user_cards'), {
+                ownerUid: user.uid,
+                cardId: 'vantage-yellow',
+                printNumber: 1,
+                totalPrintRun: 999999,
+                acquiredAt: new Date().toISOString(),
+                originalOwnerName: data.displayName,
+              });
+              await addDoc(collection(db, 'activities'), {
+                uid: user.uid,
+                text: 'Received the Creator Reward: Vantage Yellow!',
+                type: 'quest',
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -542,7 +566,6 @@ export default function App() {
     };
   }, [user]);
 
-  // ── Geolocation ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (user && userProfile) {
       if ('geolocation' in navigator) {
@@ -567,6 +590,45 @@ export default function App() {
       }
     }
   }, [user, userProfile?.uid]);
+
+  // ── Vantage Red Duplicate Cleanup ───────────────────────────────────────
+  useEffect(() => {
+    if (!user || userCards.length === 0) return;
+
+    const redCards = userCards.filter(c => c.cardId === 'vantage-red');
+    if (redCards.length > 1) {
+      console.log(`[App/Cleanup] Detected ${redCards.length} Vantage Red cards. Cleaning up...`);
+      
+      // Sort by acquiredAt (oldest first)
+      const sorted = [...redCards].sort((a, b) => 
+        new Date(a.acquiredAt).getTime() - new Date(b.acquiredAt).getTime()
+      );
+
+      // Keep the first one, delete the rest
+      const [oldest, ...duplicates] = sorted;
+      console.log(`[App/Cleanup] Keeping oldest Vantage Red: ${oldest.id} (#${oldest.printNumber})`);
+
+      const cleanup = async () => {
+        for (const duplicate of duplicates) {
+          try {
+            console.log(`[App/Cleanup] Deleting duplicate Vantage Red: ${duplicate.id}`);
+            await deleteDoc(doc(db, 'user_cards', duplicate.id));
+            
+            await addDoc(collection(db, 'activities'), {
+              uid: user.uid,
+              text: 'Archived duplicate Vantage Red card.',
+              type: 'trade',
+              timestamp: new Date().toISOString()
+            });
+          } catch (err) {
+            console.error(`[App/Cleanup] Failed to delete duplicate ${duplicate.id}:`, err);
+          }
+        }
+      };
+
+      cleanup();
+    }
+  }, [userCards, user?.uid]);
 
   // ── Quest Helpers ────────────────────────────────────────────────────────
   const progressQuest = async (type: string, amount: number = 1, uid?: string) => {

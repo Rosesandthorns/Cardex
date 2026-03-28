@@ -52,9 +52,14 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
         })
       );
 
-      const available = counts
+      const availableAll = counts
         .filter(item => item.count < item.card.totalPrintRun)
         .map(item => item.card);
+
+      // Gambit pack restriction: Cannot pull Vantage Anniversary cards
+      const available = packId === 'gambit-pack' 
+        ? availableAll.filter(c => !['vantage-red', 'vantage-yellow', 'vantage-blue'].includes(c.id))
+        : availableAll;
 
       setAvailableCards(available);
     } catch (error) {
