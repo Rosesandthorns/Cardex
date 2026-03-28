@@ -12,10 +12,10 @@ interface HomeProps {
   user: UserProfile;
   quests: Quest[];
   onOpenPack: (packId: string, cost: number, count?: number) => void;
-  collection: UserCard[];
+  ownedCards: UserCard[];
 }
 
-export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack, collection }) => {
+export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack, ownedCards = [] }) => {
   const [claiming, setClaiming] = useState(false);
 
   const getDailyRewardInfo = () => {
@@ -240,7 +240,7 @@ export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack, collection
           <button className="text-emerald-400 text-sm font-bold hover:text-emerald-300 transition-colors">View All</button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {INITIAL_PACKS.filter(p => p.id !== 'vantage-pack' || !collection.some(c => c.cardId === 'vantage-red')).map(pack => {
+          {INITIAL_PACKS.filter(p => p.id !== 'vantage-pack' || !ownedCards.some(c => c.cardId === 'vantage-red')).map(pack => {
             const price = getPackPrice(pack.price);
             const isDiscounted = price < pack.price;
             const isGambit = pack.id === 'gambit-pack';

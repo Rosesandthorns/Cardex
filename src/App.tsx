@@ -845,7 +845,7 @@ export default function App() {
 
     switch (activeTab) {
       case 'home':
-        return <Home user={userProfile!} quests={quests} onOpenPack={handleOpenPack} />;
+        return <Home user={userProfile!} quests={quests} onOpenPack={handleOpenPack} ownedCards={enrichedUserCards} />;
       case 'collection':
         return (
           <Collection
