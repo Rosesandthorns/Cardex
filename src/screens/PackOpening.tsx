@@ -29,7 +29,7 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
 
   useEffect(() => {
     if (packId === 'gambit-pack' && !targetPack) {
-      const otherPacks = INITIAL_PACKS.filter(p => p.id !== 'gambit-pack');
+      const otherPacks = INITIAL_PACKS.filter(p => p.id !== 'gambit-pack' && p.id !== 'vantage-pack');
       const randomPack = otherPacks[Math.floor(Math.random() * otherPacks.length)];
       setTargetPack(randomPack);
     } else if (packId !== 'gambit-pack') {
