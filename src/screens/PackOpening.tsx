@@ -58,7 +58,7 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
 
       // Gambit pack restriction: Cannot pull Vantage Anniversary cards
       const available = packId === 'gambit-pack' 
-        ? availableAll.filter(c => !['vantage-red', 'vantage-yellow', 'vantage-blue'].includes(c.id))
+        ? availableAll.filter(c => !c.name.includes('Vantage'))
         : availableAll;
 
       setAvailableCards(available);
