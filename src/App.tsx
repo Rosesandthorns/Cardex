@@ -591,43 +591,56 @@ export default function App() {
     }
   }, [user, userProfile?.uid]);
 
-  // ── Vantage Red Duplicate Cleanup ───────────────────────────────────────
+  // ── Vantage Red Duplicate Cleanup (Creator-Specific) ───────────────────
   useEffect(() => {
     if (!user || userCards.length === 0) return;
 
     const redCards = userCards.filter(c => c.cardId === 'vantage-red');
-    if (redCards.length > 1) {
-      console.log(`[App/Cleanup] Detected ${redCards.length} Vantage Red cards. Cleaning up...`);
-      
-      // Sort by acquiredAt (oldest first)
-      const sorted = [...redCards].sort((a, b) => 
-        new Date(a.acquiredAt).getTime() - new Date(b.acquiredAt).getTime()
-      );
+    if (redCards.length === 0) return;
 
-      // Keep the first one, delete the rest
-      const [oldest, ...duplicates] = sorted;
-      console.log(`[App/Cleanup] Keeping oldest Vantage Red: ${oldest.id} (#${oldest.printNumber})`);
+    // Group by originalOwnerName
+    const groups: Record<string, UserCard[]> = {};
+    redCards.forEach(card => {
+      const creator = card.originalOwnerName || 'Unknown';
+      if (!groups[creator]) groups[creator] = [];
+      groups[creator].push(card);
+    });
 
-      const cleanup = async () => {
-        for (const duplicate of duplicates) {
-          try {
-            console.log(`[App/Cleanup] Deleting duplicate Vantage Red: ${duplicate.id}`);
-            await deleteDoc(doc(db, 'user_cards', duplicate.id));
-            
-            await addDoc(collection(db, 'activities'), {
-              uid: user.uid,
-              text: 'Archived duplicate Vantage Red card.',
-              type: 'trade',
-              timestamp: new Date().toISOString()
-            });
-          } catch (err) {
-            console.error(`[App/Cleanup] Failed to delete duplicate ${duplicate.id}:`, err);
+    const cleanup = async () => {
+      for (const creator in groups) {
+        const creatorCards = groups[creator];
+        if (creatorCards.length > 1) {
+          console.log(`[App/Cleanup] Detected ${creatorCards.length} Vantage Red cards by creator '${creator}'. Enforcing exclusivity...`);
+          
+          // Sort by acquiredAt (oldest first)
+          const sorted = [...creatorCards].sort((a, b) => 
+            new Date(a.acquiredAt).getTime() - new Date(b.acquiredAt).getTime()
+          );
+
+          // Keep the first one, delete the rest
+          const [oldest, ...duplicates] = sorted;
+          console.log(`[App/Cleanup] Keeping original pull for creator '${creator}': ${oldest.id}`);
+
+          for (const duplicate of duplicates) {
+            try {
+              console.log(`[App/Cleanup] Deleting duplicate Vantage Red by '${creator}': ${duplicate.id}`);
+              await deleteDoc(doc(db, 'user_cards', duplicate.id));
+              
+              await addDoc(collection(db, 'activities'), {
+                uid: user.uid,
+                text: `Cleaned up duplicate Vantage Red by ${creator}.`,
+                type: 'trade',
+                timestamp: new Date().toISOString()
+              });
+            } catch (err) {
+              console.error(`[App/Cleanup] Failed to delete duplicate ${duplicate.id}:`, err);
+            }
           }
         }
-      };
+      }
+    };
 
-      cleanup();
-    }
+    cleanup();
   }, [userCards, user?.uid]);
 
   // ── Quest Helpers ────────────────────────────────────────────────────────
