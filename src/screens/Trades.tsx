@@ -31,6 +31,7 @@ export const Trades: React.FC<TradesProps> = ({ user, collection: myCards, onPro
   const [myTradeCards, setMyTradeCards] = useState<string[]>([]);
   const [theirTradeCards, setTheirTradeCards] = useState<string[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [resolvedCards, setResolvedCards] = useState<Record<string, UserCard>>({});
 
   // Sorting logic helper (same as Collection.tsx)
   const sortCards = (cards: UserCard[]) => {
@@ -203,6 +204,51 @@ export const Trades: React.FC<TradesProps> = ({ user, collection: myCards, onPro
     };
   }, [user.uid]);
 
+  // Effect to resolve all card IDs mentioned in visible trades
+  useEffect(() => {
+    const allOffers = [...incomingOffers, ...outgoingOffers, ...historyOffers];
+    const allRequiredIds = new Set<string>();
+    
+    allOffers.forEach(offer => {
+      offer.senderCardIds.forEach(id => allRequiredIds.add(id));
+      offer.receiverCardIds.forEach(id => allRequiredIds.add(id));
+    });
+
+    // Remove IDs we already have in myCards or already resolved
+    const missingIds = Array.from(allRequiredIds).filter(id => {
+      return !myCards.some(mc => mc.id === id) && !resolvedCards[id];
+    });
+
+    if (missingIds.length === 0) return;
+
+    const resolveCards = async () => {
+      const newResolved: Record<string, UserCard> = { ...resolvedCards };
+      
+      // Fetch cards in chunks of 10 to be nice to Firestore
+      for (let i = 0; i < missingIds.length; i += 10) {
+        const chunk = missingIds.slice(i, i + 10);
+        await Promise.all(chunk.map(async (id) => {
+          try {
+            const cardSnap = await getDoc(doc(db, 'user_cards', id));
+            if (cardSnap.exists()) {
+              const data = cardSnap.data();
+              const cardDef = INITIAL_CARDS.find(c => c.id === data.cardId);
+              if (cardDef) {
+                newResolved[id] = { id: cardSnap.id, ...data, card: cardDef } as UserCard;
+              }
+            }
+          } catch (err) {
+            console.error(`Error resolving card ${id}:`, err);
+          }
+        }));
+      }
+      
+      setResolvedCards(newResolved);
+    };
+
+    resolveCards();
+  }, [incomingOffers, outgoingOffers, historyOffers, myCards]);
+
   const handleSelectUser = async (u: UserProfile) => {
     setSelectedUser(u);
     const q = query(collection(db, 'user_cards'), where('ownerUid', '==', u.uid));
@@ -321,13 +367,17 @@ export const Trades: React.FC<TradesProps> = ({ user, collection: myCards, onPro
   };
 
   const getCardById = (id: string) => {
-    // Check my cards
+    // 1. Check current resolution cache (priority for trade display)
+    if (resolvedCards[id]) return resolvedCards[id];
+    
+    // 2. Check my cards
     const myCard = myCards.find(c => c.id === id);
     if (myCard) return myCard;
-    // Check selected user cards (if in creation mode)
+    
+    // 3. Check selected user cards (if in creation mode)
     const theirCard = selectedUserCards.find(c => c.id === id);
     if (theirCard) return theirCard;
-    // This is a fallback, in a real app you'd fetch the card doc
+    
     return null;
   };
 
