@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ChipDisplay } from '../components/ChipDisplay';
 import { INITIAL_PACKS } from '../constants';
-import { Quest, UserProfile } from '../types';
+import { Quest, UserProfile, UserCard } from '../types';
 import { TrendingUp, Zap, Gift, CheckCircle } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, updateDoc, addDoc, collection, increment } from 'firebase/firestore';
@@ -12,9 +12,10 @@ interface HomeProps {
   user: UserProfile;
   quests: Quest[];
   onOpenPack: (packId: string, cost: number, count?: number) => void;
+  collection: UserCard[];
 }
 
-export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack }) => {
+export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack, collection }) => {
   const [claiming, setClaiming] = useState(false);
 
   const getDailyRewardInfo = () => {
@@ -239,7 +240,7 @@ export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack }) => {
           <button className="text-emerald-400 text-sm font-bold hover:text-emerald-300 transition-colors">View All</button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {INITIAL_PACKS.map(pack => {
+          {INITIAL_PACKS.filter(p => p.id !== 'vantage-pack' || !collection.some(c => c.cardId === 'vantage-red')).map(pack => {
             const price = getPackPrice(pack.price);
             const isDiscounted = price < pack.price;
             const isGambit = pack.id === 'gambit-pack';
@@ -285,20 +286,22 @@ export const Home: React.FC<HomeProps> = ({ user, quests, onOpenPack }) => {
                       <span className="text-sm">Open 1x</span>
                       <ChipDisplay amount={price} size="sm" className={user.chips < price ? 'text-zinc-500' : 'text-amber-600'} />
                     </button>
-                    <button
-                      onClick={() => onOpenPack(pack.id, Math.floor(price * 2.5), 3)}
-                      disabled={user.chips < Math.floor(price * 2.5)}
-                      className={`flex-1 py-3 rounded-2xl font-bold flex flex-col items-center justify-center transition-all ${
-                        user.chips >= Math.floor(price * 2.5)
-                          ? 'bg-white text-black hover:bg-emerald-400 shadow-xl'
-                          : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                      }`}
-                    >
-                      <span className="text-sm">Open 3x</span>
-                      <div className="flex items-center gap-1">
-                        <ChipDisplay amount={Math.floor(price * 2.5)} size="sm" className={user.chips < Math.floor(price * 2.5) ? 'text-zinc-500' : 'text-amber-600'} />
-                      </div>
-                    </button>
+                    {pack.id !== 'vantage-pack' && (
+                      <button
+                        onClick={() => onOpenPack(pack.id, Math.floor(price * 2.5), 3)}
+                        disabled={user.chips < Math.floor(price * 2.5)}
+                        className={`flex-1 py-3 rounded-2xl font-bold flex flex-col items-center justify-center transition-all ${
+                          user.chips >= Math.floor(price * 2.5)
+                            ? 'bg-white text-black hover:bg-emerald-400 shadow-xl'
+                            : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                        }`}
+                      >
+                        <span className="text-sm">Open 3x</span>
+                        <div className="flex items-center gap-1">
+                          <ChipDisplay amount={Math.floor(price * 2.5)} size="sm" className={user.chips < Math.floor(price * 2.5) ? 'text-zinc-500' : 'text-amber-600'} />
+                        </div>
+                      </button>
+                    )}
                   </div>
                   {isDiscounted && (
                     <p className="text-[10px] text-amber-400 font-bold mt-2 text-center uppercase tracking-widest animate-pulse">

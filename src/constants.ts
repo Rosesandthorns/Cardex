@@ -25,6 +25,12 @@ export const RARITY_CONFIG = {
     frame: 'border-amber-400 border-4 shadow-[0_0_25px_rgba(251,191,36,0.8)]',
     glow: 'shadow-amber-500/60',
   },
+  [Rarity.LIMITED]: {
+    printRun: 999999,
+    color: 'from-zinc-100 to-zinc-300',
+    frame: 'border-zinc-200 shadow-[0_0_15px_rgba(255,255,255,0.4)]',
+    glow: 'shadow-white/10',
+  },
 };
 
 const GITHUB_BASE_URL = '';
@@ -113,6 +119,17 @@ export const INITIAL_PACKS: Pack[] = [
       [Rarity.LEGENDARY]: 0.05,
     }
   },
+  { 
+    id: 'vantage-pack', 
+    name: 'Vantage Pack', 
+    price: 1, 
+    description: 'A special gift for our earliest supporters. Limit 1 per player.', 
+    color: 'from-white via-zinc-200 to-zinc-400',
+    image: `${GITHUB_BASE_URL}/Vantage.png`,
+    pullOdds: {
+      [Rarity.LIMITED]: 100,
+    }
+  },
 ];
 
 export const INITIAL_CARDS: Card[] = [
@@ -191,6 +208,11 @@ export const INITIAL_CARDS: Card[] = [
   { id: 'disgrace-sins', name: 'Sins', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/sinsundertale.png` },
   { id: 'disgrace-man-upstairs', name: 'Man Upstairs', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/manupstairs.png` },
   { id: 'disgrace-broken-camera', name: 'Cracked Camera', rarity: Rarity.LEGENDARY, totalPrintRun: 1, packName: 'Disgrace', image: `${GITHUB_BASE_URL}/brokencamera.png`, isFullArt: true },
+  
+  // Vantage Anniversary Set
+  { id: 'vantage-red', name: 'Vantage Red', rarity: Rarity.LIMITED, totalPrintRun: 999999, packName: 'Vantage Pack', image: `${GITHUB_BASE_URL}/Vantage Red.png`, isFullArt: true, description: "Given to {owner} for being with Vantage since the start" },
+  { id: 'vantage-yellow', name: 'Vantage Yellow', rarity: Rarity.LIMITED, totalPrintRun: 999999, packName: 'N/A', image: `${GITHUB_BASE_URL}/Vantage Yellow.png`, isFullArt: true, description: "A golden beacon of what's to come." },
+  { id: 'vantage-blue', name: 'Vantage Blue', rarity: Rarity.LIMITED, totalPrintRun: 999999, packName: 'N/A', image: `${GITHUB_BASE_URL}/Vantage Blue.png`, isFullArt: true, description: "Given to {artist} for helping add content to Vantage in its early days." },
 ];
 
 export const INITIAL_QUESTS: Omit<Quest, 'uid' | 'id'>[] = [];

@@ -3,6 +3,7 @@ export enum Rarity {
   UNCOMMON = 'Uncommon',
   RARE = 'Rare',
   LEGENDARY = 'Legendary',
+  LIMITED = 'Limited',
 }
 
 export interface Card {
@@ -13,6 +14,7 @@ export interface Card {
   packName: string;
   image: string;
   isFullArt?: boolean;
+  description?: string;
 }
 
 export interface UserCard {
@@ -21,6 +23,7 @@ export interface UserCard {
   cardId: string;
   printNumber: number;
   acquiredAt: string;
+  originalOwnerName?: string;
   // Joined data for UI
   card?: Card;
   isForSale?: boolean;

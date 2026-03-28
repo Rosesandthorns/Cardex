@@ -194,6 +194,32 @@ export default function App() {
             console.log('[App] Quests up to date. Validating...');
             await refreshQuests(user.uid, false);
           }
+
+          // ── Artist Reward (Vantage Blue) ──────────────────────────────────
+          const creatorIdentifier = `@${data.username}`;
+          const isArtist = INITIAL_PACKS.some(p => p.creator?.toLowerCase() === creatorIdentifier.toLowerCase());
+          
+          if (isArtist) {
+            const blueQuery = query(collection(db, 'user_cards'), where('ownerUid', '==', user.uid), where('cardId', '==', 'vantage-blue'));
+            const blueSnap = await getDocs(blueQuery);
+            if (blueSnap.empty) {
+              console.log('[App] Artist detected! Gifting Vantage Blue...');
+              await addDoc(collection(db, 'user_cards'), {
+                ownerUid: user.uid,
+                cardId: 'vantage-blue',
+                printNumber: 1,
+                totalPrintRun: 999999,
+                acquiredAt: new Date().toISOString(),
+                originalOwnerName: data.displayName,
+              });
+              await addDoc(collection(db, 'activities'), {
+                uid: user.uid,
+                text: 'Received the Artist Reward: Vantage Blue!',
+                type: 'quest',
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -669,6 +695,7 @@ export default function App() {
           printNumber: assignedPrintNumber,
           totalPrintRun: card.totalPrintRun,
           acquiredAt: new Date().toISOString(),
+          originalOwnerName: userProfile.displayName,
         });
 
         await addDoc(collection(db, 'activities'), {
