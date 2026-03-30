@@ -43,6 +43,7 @@ body {
   );
   transform: rotate(45deg);
   animation: shimmer 3s infinite;
+  will-change: transform;
 }
 
 @keyframes shimmer {
@@ -72,6 +73,7 @@ body {
   animation: holo 4s ease-in-out infinite;
   pointer-events: none;
   z-index: 5;
+  will-change: transform;
 }
 
 .card-holographic::after {

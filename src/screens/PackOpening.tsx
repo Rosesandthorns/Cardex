@@ -37,7 +37,7 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
     }
   }, [pack, packId, targetPack]);
 
-  const fetchAvailableCards = useCallback(async () => {
+  const fetchAvailableCards = useCallback(async (retryCount = 0) => {
     if (!targetPack) return;
     setLoading(true);
     try {
@@ -46,9 +46,14 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
       // Fetch all counts in parallel for better performance
       const counts = await Promise.all(
         packCards.map(async (card) => {
-          const q = query(collection(db, 'user_cards'), where('cardId', '==', card.id));
-          const snap = await getCountFromServer(q);
-          return { card, count: snap.data().count };
+          try {
+            const q = query(collection(db, 'user_cards'), where('cardId', '==', card.id));
+            const snap = await getCountFromServer(q);
+            return { card, count: snap.data().count };
+          } catch (err) {
+            console.error(`Error fetching count for card ${card.id}:`, err);
+            return { card, count: card.totalPrintRun }; // Assume full if error to be safe
+          }
         })
       );
 
@@ -61,13 +66,26 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
         ? availableAll.filter(c => !c.name.includes('Vantage'))
         : availableAll;
 
+      if (available.length === 0 && packId === 'gambit-pack' && retryCount < 5) {
+        // Silently retry with a different pack pool
+        console.log(`[Gambit] Pack ${targetPack.name} sold out, retrying...`);
+        const otherPacks = INITIAL_PACKS.filter(p => p.id !== 'gambit-pack' && p.id !== 'vantage-pack' && p.id !== targetPack.id);
+        if (otherPacks.length > 0) {
+          const nextPack = otherPacks[Math.floor(Math.random() * otherPacks.length)];
+          setTargetPack(nextPack);
+          // fetchAvailableCards will be re-triggered by the targetPack dependency
+          return;
+        }
+      }
+
       setAvailableCards(available);
     } catch (error) {
       console.error("Error fetching available cards:", error);
+      alert("Failed to check pack stock. Please check your connection.");
     } finally {
       setLoading(false);
     }
-  }, [targetPack]);
+  }, [targetPack, packId]);
 
   useEffect(() => {
     fetchAvailableCards();
@@ -94,7 +112,6 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
       let cumulative = 0;
       let selectedRarity: Rarity = Rarity.COMMON;
 
-      // Sort rarities to ensure consistent cumulative check
       const rarities = [Rarity.COMMON, Rarity.UNCOMMON, Rarity.RARE, Rarity.LEGENDARY];
       
       for (const r of rarities) {
@@ -106,10 +123,38 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
         }
       }
 
-      // Find available cards of the selected rarity
-      let pool = availableCards.filter(c => c.rarity === selectedRarity);
+      const getPool = (r: Rarity) => availableCards.filter(c => c.rarity === r);
+
+      // Implement specific fallback chain
+      let pool = getPool(selectedRarity);
       
-      // Fallback if no cards of that rarity are available (print run reached)
+      if (pool.length === 0) {
+        if (selectedRarity === Rarity.COMMON) {
+          // Common out of stock → try Uncommon
+          pool = getPool(Rarity.UNCOMMON);
+        } else if (selectedRarity === Rarity.UNCOMMON) {
+          // Uncommon out of stock → try Common
+          pool = getPool(Rarity.COMMON);
+        } else if (selectedRarity === Rarity.RARE) {
+          // Rare out of stock → try Uncommon
+          pool = getPool(Rarity.UNCOMMON);
+        } else if (selectedRarity === Rarity.LEGENDARY) {
+          // Legendary out of stock → try Rare
+          pool = getPool(Rarity.RARE);
+        }
+      }
+
+      // Chain logic: Common and Uncommon both out of stock → try Rare
+      if (pool.length === 0 && (selectedRarity === Rarity.COMMON || selectedRarity === Rarity.UNCOMMON)) {
+          pool = getPool(Rarity.RARE);
+      }
+
+      // Chain logic: Common, Uncommon, and Rare all out of stock → try Legendary
+      if (pool.length === 0 && (selectedRarity === Rarity.COMMON || selectedRarity === Rarity.UNCOMMON || selectedRarity === Rarity.RARE)) {
+          pool = getPool(Rarity.LEGENDARY);
+      }
+
+      // Final fallback: if everything is out of stock (shouldn't happen if availableCards has length > 0)
       if (pool.length === 0) {
         pool = availableCards;
       }
@@ -177,16 +222,17 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
             className="flex flex-col items-center gap-8"
           >
             <div className="w-64 h-96 rounded-3xl shadow-2xl shadow-indigo-500/20 border border-white/20 flex items-center justify-center relative group overflow-hidden">
-               {pack?.image ? (
-                 <img 
-                   src={pack.image}
-                   alt="Pack"
-                   className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                   referrerPolicy="no-referrer"
-                 />
-               ) : (
-                 <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 animate-spin-slow opacity-80" />
-               )}
+                {pack?.image ? (
+                  <img 
+                    src={pack.image}
+                    alt="Pack"
+                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 animate-spin-slow opacity-80" />
+                )}
                <div className="absolute inset-0 card-shimmer opacity-30" />
             </div>
             <div className="text-center space-y-2">
@@ -233,7 +279,7 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex justify-center"
+                    className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 max-h-[70vh] overflow-y-auto px-4 py-8"
                   >
                     {revealedCards.map((card, idx) => (
                       <motion.div
@@ -241,8 +287,9 @@ export const PackOpening: React.FC<PackOpeningProps> = ({ packId, packCost, user
                         initial={{ opacity: 0, scale: 0.8 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: idx * 0.1 }}
+                        className="flex justify-center"
                       >
-                        <Card card={card} size="lg" />
+                        <Card card={card} size={revealedCards.length > 3 ? "md" : "lg"} />
                       </motion.div>
                     ))}
                   </motion.div>

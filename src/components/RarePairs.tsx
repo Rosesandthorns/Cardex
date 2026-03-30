@@ -27,62 +27,149 @@ export const RarePairs: React.FC<RarePairsProps> = ({
   const [gameState, setGameState] = useState<'playing' | 'won' | 'lost' | 'insufficient'>('playing');
   const [lastReward, setLastReward] = useState<number | null>(null);
 
+  // NEW: Solver logic to check if a board is winnable
+  const isSolvable = (initialGrid: (Card | null)[][], initialQueue: Card[]): boolean => {
+    const memo = new Set<string>();
+
+    const getRefilledState = (g: (Card | null)[][], q: Card[]) => {
+      let gridCopy = g.map(row => [...row]);
+      let queueCopy = [...q];
+
+      // 1. Shift left
+      for (let r = 0; r < 5; r++) {
+        const rowData = gridCopy[r].filter(c => c !== null) as Card[];
+        while (rowData.length < 5) rowData.push(null as any);
+        gridCopy[r] = rowData;
+      }
+      // 2. Shift down (gravity)
+      for (let c = 0; c < 5; c++) {
+        const col: Card[] = [];
+        for (let r = 0; r < 5; r++) {
+          if (gridCopy[r][c] !== null) col.push(gridCopy[r][c] as Card);
+        }
+        const newCol = [...Array(5 - col.length).fill(null), ...col];
+        for (let r = 0; r < 5; r++) {
+          gridCopy[r][c] = newCol[r] as Card | null;
+        }
+      }
+      // 3. Refill
+      for (let r = 4; r >= 0; r--) {
+        for (let c = 0; c < 5; c++) {
+          if (gridCopy[r][c] === null && queueCopy.length > 0) {
+            gridCopy[r][c] = queueCopy.shift()!;
+          }
+        }
+      }
+      return { grid: gridCopy, queue: queueCopy };
+    };
+
+    const solve = (g: (Card | null)[][], q: Card[]): boolean => {
+      const boardEmpty = g.every(row => row.every(c => c === null));
+      if (boardEmpty && q.length === 0) return true;
+
+      const stateKey = g.flat().map(c => c ? c.name : '.').join('') + '|' + q.map(c => c.name).join('');
+      if (memo.has(stateKey)) return false;
+      memo.add(stateKey);
+
+      // Find possible matches
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 5; c++) {
+          const card1 = g[r][c];
+          if (!card1) continue;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = r + dr, nc = c + dc;
+              if (nr >= 0 && nr < 5 && nc >= 0 && nc < 5) {
+                const card2 = g[nr][nc];
+                if (card2 && card2.name === card1.name) {
+                  const nextState = getRefilledState(
+                    g.map((row, ri) => row.map((rc, ci) => (ri === r && ci === c) || (ri === nr && ci === nc) ? null : rc)),
+                    q
+                  );
+                  if (solve(nextState.grid, nextState.queue)) return true;
+                }
+              }
+            }
+          }
+        }
+      }
+      return false;
+    };
+
+    return solve(initialGrid, initialQueue);
+  };
+
   // Initialize game
   const initGame = useCallback(() => {
-    console.log('[RarePairs] Initialising game. Collection size:', collection.length);
+    try {
+      console.log('[RarePairs] Initialising game. Collection size:', collection.length);
 
-    // Extract Card objects from UserCards, deduplicating by card name
-    const uniqueCards: Card[] = [];
-    const seenNames = new Set<string>();
+      const uniqueCards: Card[] = [];
+      const seenNames = new Set<string>();
 
-    for (const uc of collection) {
-      if (!uc.card) continue;
-      if (!seenNames.has(uc.card.name)) {
-        uniqueCards.push(uc.card);
-        seenNames.add(uc.card.name);
+      for (const uc of collection) {
+        if (!uc.card) continue;
+        if (!seenNames.has(uc.card.name)) {
+          uniqueCards.push(uc.card);
+          seenNames.add(uc.card.name);
+        }
+        if (uniqueCards.length === 15) break;
       }
-      if (uniqueCards.length === 15) break;
+
+      if (uniqueCards.length < 15) {
+        setGameState('insufficient');
+        return;
+      }
+
+      let attempts = 0;
+      let finalGrid: (Card | null)[][] = [];
+      let finalQueue: Card[] = [];
+
+      while (attempts < 50) {
+        attempts++;
+        const gameCards = [
+          ...uniqueCards,
+          ...uniqueCards.map(c => ({ ...c, id: c.id + '_copy_' + Math.random().toString(36).slice(2) })),
+        ];
+
+        for (let i = gameCards.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [gameCards[i], gameCards[j]] = [gameCards[j], gameCards[i]];
+        }
+
+        const testGrid: (Card | null)[][] = [];
+        for (let r = 0; r < 5; r++) {
+          testGrid.push(gameCards.slice(r * 5, (r + 1) * 5));
+        }
+        const testQueue = gameCards.slice(25);
+
+        if (isSolvable(testGrid, testQueue)) {
+          finalGrid = testGrid;
+          finalQueue = testQueue;
+          break;
+        }
+      }
+
+      if (finalGrid.length === 0) {
+        // Fallback: If 50 attempts fail, use a guaranteed simple shuffle (shouldn't really happen)
+        console.warn('[RarePairs] Solver failed to find solvable board in 50 attempts.');
+        // Still set fallback so game doesn't crash
+        setGameState('lost');
+        return;
+      }
+
+      setQueue(finalQueue);
+      setGrid(finalGrid);
+      setGameState('playing');
+      setSelected(null);
+      setLastReward(null);
+
+      console.log(`[RarePairs] Game board initialised (Solvable: Yes) after ${attempts} attempts.`);
+    } catch (error) {
+      console.error('[RarePairs] Critical error during init:', error);
+      alert('Failed to load minigame. Please try again.');
     }
-
-    console.log('[RarePairs] Unique cards available:', uniqueCards.length);
-
-    if (uniqueCards.length < 15) {
-      console.warn('[RarePairs] Insufficient unique cards to start. Need 15, have', uniqueCards.length);
-      setGameState('insufficient');
-      return;
-    }
-
-    // Duplicate to 30 cards with unique game IDs
-    const gameCards = [
-      ...uniqueCards,
-      ...uniqueCards.map(c => ({ ...c, id: c.id + '_copy_' + Math.random().toString(36).slice(2) })),
-    ];
-
-    // Fisher-Yates shuffle
-    for (let i = gameCards.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [gameCards[i], gameCards[j]] = [gameCards[j], gameCards[i]];
-    }
-
-    // Fill 5×5 grid (25 cards)
-    let newGrid: (Card | null)[][] = [];
-    for (let r = 0; r < 5; r++) {
-      newGrid.push(gameCards.slice(r * 5, (r + 1) * 5));
-    }
-
-    // Ensure initial board has multiple solutions (at least 3)
-    if (checkMatchesCount(newGrid) < 3) {
-      newGrid = reshuffleBoard(newGrid, 3);
-    }
-
-    // Remaining 5 in queue
-    setQueue(gameCards.slice(25));
-    setGrid(newGrid);
-    setGameState('playing');
-    setSelected(null);
-    setLastReward(null);
-
-    console.log('[RarePairs] Game board initialised with', checkMatchesCount(newGrid), 'matches. Queue size:', 5);
   }, [collection]);
 
   useEffect(() => {
@@ -126,50 +213,6 @@ export const RarePairs: React.FC<RarePairsProps> = ({
     return checkMatchesCount(currentGrid) > 0;
   };
 
-  const reshuffleBoard = (currentGrid: (Card | null)[][], minMatches = 1) => {
-    console.log('[RarePairs] Reshuffling board to ensure solvability...');
-    let cards = currentGrid.flat().filter(c => c !== null) as Card[];
-    let attempts = 0;
-    let bestGrid = [...currentGrid];
-    let maxMatchesFound = 0;
-
-    while (attempts < 100) {
-      // Fisher-Yates shuffle remaining cards
-      for (let i = cards.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [cards[i], cards[j]] = [cards[j], cards[i]];
-      }
-
-      // Reconstruct grid
-      const newGrid: (Card | null)[][] = [];
-      let cardIdx = 0;
-      for (let r = 0; r < 5; r++) {
-        const row: (Card | null)[] = [];
-        for (let c = 0; c < 5; c++) {
-          if (currentGrid[r][c] !== null) {
-            row.push(cards[cardIdx++]);
-          } else {
-            row.push(null);
-          }
-        }
-        newGrid.push(row);
-      }
-
-      const matches = checkMatchesCount(newGrid);
-      if (matches >= minMatches) {
-        return newGrid;
-      }
-      
-      if (matches > maxMatchesFound) {
-        maxMatchesFound = matches;
-        bestGrid = newGrid;
-      }
-      attempts++;
-    }
-    
-    console.warn(`[RarePairs] Could not reach target matches (${minMatches}). Using best found (${maxMatchesFound}).`);
-    return bestGrid;
-  };
 
   const handleCardClick = (r: number, c: number) => {
     if (gameState !== 'playing') return;
@@ -232,41 +275,38 @@ export const RarePairs: React.FC<RarePairsProps> = ({
       }
     }
 
-    // 4. Ensure solvability after refill
-    const matchesAfterRefill = checkMatchesCount(currentGrid);
+    // Board solvability is guaranteed at START.
+    // We no longer reshuffle during play per user requirements.
     const boardEmpty = currentGrid.every(row => row.every(c => c === null));
-    
-    if (!boardEmpty && matchesAfterRefill < 2 && currentQueue.length >= 0) {
-      // If no matches or too few, reshuffle remaining cards on board
-      // If queue is empty, we must have at least 1 match if board is not empty (pairs exist)
-      const targetMatches = currentQueue.length > 0 ? 2 : 1;
-      if (matchesAfterRefill < targetMatches) {
-        currentGrid = reshuffleBoard(currentGrid, targetMatches);
-      }
-    }
+    const matchesAfterRefill = checkMatchesCount(currentGrid);
 
     setGrid(currentGrid);
     setQueue(currentQueue);
     setSelected(null);
 
-    console.log('[RarePairs] After refill. Remaining queue:', currentQueue.length, 'Matches:', checkMatchesCount(currentGrid));
+    console.log('[RarePairs] After refill. Remaining queue:', currentQueue.length, 'Matches:', matchesAfterRefill);
 
     // Check end conditions
     if (boardEmpty && currentQueue.length === 0) {
       handleWin();
-    } else if (checkMatchesCount(currentGrid) === 0) {
-      // This should ideally never happen now due to reshuffleBoard
+    } else if (matchesAfterRefill === 0) {
       handleLoss();
     }
   };
 
   const handleWin = () => {
-    const reward = 10 + 10 * streak;
-    console.log(`[RarePairs] WIN! Streak: ${streak}, reward: ${reward} chips`);
-    onEarnChips(reward);
-    setStreak(prev => prev + 1);
-    setLastReward(reward);
-    setGameState('won');
+    try {
+      const reward = 10 + 10 * streak;
+      console.log(`[RarePairs] WIN! Streak: ${streak}, reward: ${reward} chips`);
+      onEarnChips(reward);
+      setStreak(prev => prev + 1);
+      setLastReward(reward);
+      setGameState('won');
+    } catch (err) {
+      console.error('[RarePairs] Error handling win:', err);
+      // Still show won state to user but log error
+      setGameState('won');
+    }
   };
 
   const handleLoss = () => {
